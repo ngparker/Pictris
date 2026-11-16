@@ -209,3 +209,36 @@ test('photo picker: random within era per game, avoids used and recently seen ph
   assert.ok(idx(photoForLevel(photos, 16, { seed: 2, loop: true })) < 10);
   assert.ok(idx(photoForLevel(photos, 16, { seed: 2 })) >= 140);
 });
+
+test('shared album: link validation and page parsing', async () => {
+  const A = await import('../src/album.js');
+  assert.equal(A.normalizeAlbumUrl(' https://photos.app.goo.gl/AbC123xyz '), 'https://photos.app.goo.gl/AbC123xyz');
+  assert.equal(A.normalizeAlbumUrl('https://photos.google.com/share/AF1QipABC?key=k1&x=1#f'), 'https://photos.google.com/share/AF1QipABC?key=k1');
+  for (const bad of ['', 'javascript:alert(1)', 'https://evil.example/photos.app.goo.gl/x', 'https://photos.google.com/album/1', 'https://photos.app.goo.gl.evil.com/x'])
+    assert.equal(A.normalizeAlbumUrl(bad), null, bad);
+  assert.ok(A.validRelay('https://r.example/?url={url}'));
+  assert.ok(!A.validRelay('http://r.example/?url={url}'));
+  assert.ok(!A.validRelay('https://r.example/'));
+
+  const item = (key, path, w, h, ts) =>
+    `["${key}",["https://lh3.googleusercontent.com/pw/${path}",${w},${h},null,null,null,null,null,null,[5152313]],${ts},"hash${key}",-25200000,${ts + 5000},null,null]`;
+  const html = `<html><head><title>x</title><meta property="og:title" content="Kids &amp; Co · Google Photos">
+    <meta property="og:image" content="https://lh3.googleusercontent.com/pw/COVER=w600-h315-p-k"></head><body><script>
+    AF_initDataCallback({key: 'ds:1', data:[null,[${item('AF1QipAAAAAAAAAAAAAAAAAAAAAAAA', 'AAA', 4032, 3024, 1402567890123)},
+    ${item('AF1QipBBBBBBBBBBBBBBBBBBBBBBBB', 'BBB', 3024, 4032, 1602567890123)},
+    ${item('AF1QipAAAAAAAAAAAAAAAAAAAAAAAA', 'AAA', 4032, 3024, 1402567890123)}],
+    ["https://lh3.googleusercontent.com/a/avatar",32,32],
+    ["https://evil.example/x.jpg",4000,3000,null],1402567890123]});</script></body></html>`;
+  const a = A.parseAlbumHtml(html, 1800000000000);
+  assert.equal(a.title, 'Kids & Co');
+  assert.equal(a.items.length, 2, 'deduped, avatar and foreign hosts ignored');
+  assert.deepEqual(a.items.map((i) => [i.id, i.url, i.w, i.h, i.date]), [
+    ['g:AF1QipAAAAAAAAAAAAAAAAAAAAAAAA', 'https://lh3.googleusercontent.com/pw/AAA', 4032, 3024, 1402567890123],
+    ['g:AF1QipBBBBBBBBBBBBBBBBBBBBBBBB', 'https://lh3.googleusercontent.com/pw/BBB', 3024, 4032, 1602567890123],
+  ]);
+  const recs = A.albumRecords(a);
+  assert.equal(A.sized(recs[0], 240, true), 'https://lh3.googleusercontent.com/pw/AAA=w240-h240-c');
+  assert.equal(A.shareLink('https://photos.app.goo.gl/AbC', 'https://x.github.io/Pictris/'),
+    'https://x.github.io/Pictris/?album=https%3A%2F%2Fphotos.app.goo.gl%2FAbC');
+  assert.equal(A.parseAlbumHtml('<html>nothing</html>').items.length, 0);
+});

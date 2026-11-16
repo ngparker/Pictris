@@ -98,6 +98,15 @@ label.stack { display: flex; flex-direction: column; gap: 4px; font-size: 13px; 
 .drop { border: 1.5px dashed rgba(255,255,255,.2); border-radius: 14px; padding: 18px; margin: 14px 0;
   display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; text-align: center; }
 .drop p { margin: 0; color: var(--muted); }
+.albumlink .row { margin-top: 8px; }
+.albumlink input[type=url], .albumlink input[type=text], #gClientId { flex: 3; min-width: 0; width: 100%; }
+.albumlink .row > button { flex: 0 0 auto; }
+#shareUrl { margin-top: 8px; font-size: 12px; color: var(--muted); }
+details.adv { margin-top: 8px; font-size: 13px; color: var(--muted); }
+details.adv summary { cursor: pointer; }
+a { color: var(--accent); }
+.note { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.tile.remote .del { display: none; }
 .drop.over { border-color: var(--accent); background: rgba(143,184,255,.08); }
 details.gp { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
 details.gp summary { cursor: pointer; font-weight: 600; }

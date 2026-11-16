@@ -3,6 +3,7 @@ import { Renderer, PIECE_LAYERS } from './renderer.js';
 import { Sound } from './audio.js';
 import * as P from './photos.js';
 import * as G from './gphotos.js';
+import * as A from './album.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -12,7 +13,7 @@ const DEFAULTS = {
   blockStyle: 'reveal', order: 'chrono', span: 15, background: true, dim: 0.45, blur: 1.5, tint: 0.15,
   boardOpacity: 0.72, captions: true, ghost: true, previews: 5, das: 167, arr: 33, clearText: true,
   reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, volume: 0.5, moveSounds: false,
-  startLevel: 1, gClientId: '', celebrate: true, avoidRepeats: true,
+  startLevel: 1, gClientId: '', celebrate: true, avoidRepeats: true, albumUrl: '', relay: '',
 };
 const load = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return { ...d }; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
@@ -44,7 +45,7 @@ const bitmapCache = new Map();
 // ---------------- photos ----------------
 async function bitmapFor(rec) {
   if (bitmapCache.has(rec.id)) return bitmapCache.get(rec.id);
-  const bmp = await createImageBitmap(rec.blob);
+  const bmp = await createImageBitmap(rec.remote ? await A.remoteBlob(rec, 2048, relays()) : rec.blob);
   bitmapCache.set(rec.id, bmp);
   // Evict without close(): an in-flight caller may still be about to upload it; GC reclaims it.
   if (bitmapCache.size > 16) bitmapCache.delete(bitmapCache.keys().next().value);
@@ -158,12 +159,68 @@ function showLevelPhoto(level, mode = game?.mode) {
 const fmtDate = (ms) => new Date(ms).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 const fmtDay = (ms) => new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
 
-async function refreshPhotos() {
-  photos = await P.listPhotos();
+// ---- album links ----
+// A link opened with ?album=… plays that album only, without touching this browser's own library.
+const sharedAlbumUrl = A.normalizeAlbumUrl(new URLSearchParams(location.search).get('album') || '');
+const activeAlbumUrl = () => sharedAlbumUrl || A.normalizeAlbumUrl(settings.albumUrl);
+const relays = () => A.relayList(settings.relay);
+let album = null; // { title, items, url }
+let albumError = '';
+
+async function loadActiveAlbum() {
+  const url = activeAlbumUrl();
+  album = null; albumError = '';
+  if (!url) return;
+  try {
+    album = await A.loadAlbum(url, { relays: relays(), onUpdate: (a) => { if (activeAlbumUrl() === a.url) { album = a; mergePhotos(); } } });
+  } catch (e) {
+    albumError = e.message;
+  }
+}
+
+let localPhotos = [];
+function mergePhotos() {
+  const remote = album ? A.albumRecords(album) : [];
+  photos = (sharedAlbumUrl ? remote : [...localPhotos, ...remote]).sort((a, b) => a.date - b.date);
   $('#photoCount').textContent = photos.length;
-  $('#photoHint').textContent = photos.length
-    ? `${photos.length} photo${photos.length > 1 ? 's' : ''}, ${fmtDate(photos[0].date)} – ${fmtDate(photos[photos.length - 1].date)}`
-    : 'Add some family photos to see them appear as you play.';
+  const range = photos.length ? `${fmtDate(photos[0].date)} – ${fmtDate(photos[photos.length - 1].date)}` : '';
+  const name = album?.title ? `“${album.title}”` : 'Shared album';
+  let hint;
+  if (albumError && sharedAlbumUrl) hint = albumError;
+  else if (sharedAlbumUrl) hint = `${name} · ${photos.length} photos, ${range}`;
+  else if (photos.length) hint = `${photos.length} photo${photos.length > 1 ? 's' : ''}, ${range}`;
+  else hint = 'Add some family photos to see them appear as you play.';
+  $('#photoHint').textContent = hint;
+  $('#sharedBar').hidden = !sharedAlbumUrl;
+  $('#menuShareRow').hidden = !(album && activeAlbumUrl());
+}
+
+async function refreshPhotos({ reloadAlbum = false } = {}) {
+  try { localPhotos = sharedAlbumUrl ? [] : await P.listPhotos(); } catch (e) { console.warn('IndexedDB unavailable', e); localPhotos = []; }
+  if (reloadAlbum || (!album && !albumError)) await loadActiveAlbum();
+  mergePhotos();
+}
+
+async function shareGame(statusEl) {
+  const url = activeAlbumUrl();
+  if (!url) return;
+  const link = A.shareLink(url);
+  const field = $('#shareUrl');
+  field.value = link;
+  try {
+    if (navigator.share && matchMedia('(pointer: coarse)').matches) {
+      await navigator.share({ title: 'Pictris', text: album?.title ? `Play Pictris with “${album.title}”` : 'Play Pictris with our photos', url: link });
+      statusEl.textContent = '';
+    } else {
+      await navigator.clipboard.writeText(link);
+      statusEl.textContent = 'Link copied. Anyone who opens it plays with this album.';
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    field.hidden = false;
+    statusEl.textContent = 'Copy the link below:';
+    if ($('#photosDlg').open) { field.focus(); field.select(); } else prompt('Copy this link', link);
+  }
 }
 
 // Calm slideshow behind the menu.
@@ -554,8 +611,10 @@ function renderAlbum() {
     b.type = 'button';
     b.title = `Level ${g.level} · ${fmtDate(g.rec.date)}`;
     const img = new Image();
-    const url = URL.createObjectURL(g.rec.thumb);
-    albumThumbs.push(url);
+    let url;
+    if (g.rec.remote) url = A.sized(g.rec, 240, true);
+    else { url = URL.createObjectURL(g.rec.thumb); albumThumbs.push(url); }
+    img.referrerPolicy = 'no-referrer';
     img.src = url; img.alt = b.title;
     b.append(img);
     b.onclick = () => albumShow(i);
@@ -567,8 +626,9 @@ function albumShow(i) {
   albumAt = (i + gameShown.length) % gameShown.length;
   const g = gameShown[albumAt];
   if (albumUrl) URL.revokeObjectURL(albumUrl);
-  albumUrl = URL.createObjectURL(g.rec.blob);
-  $('#albumImg').src = albumUrl;
+  albumUrl = g.rec.remote ? null : URL.createObjectURL(g.rec.blob);
+  $('#albumImg').referrerPolicy = 'no-referrer';
+  $('#albumImg').src = albumUrl || A.sized(g.rec, 2048);
   $('#albumCap').textContent = `${fmtDay(g.rec.date)} · level ${g.level}`;
   [...$('#albumStrip').children].forEach((b, k) => {
     b.setAttribute('aria-current', k === albumAt);
@@ -621,20 +681,27 @@ async function renderGrid() {
   const est = await P.storageEstimate();
   $('#libSummary').textContent = `${photos.length} photo${photos.length === 1 ? '' : 's'}` +
     (est?.usage ? ` · ${(est.usage / 1048576).toFixed(0)} MB used` : '');
-  $('#clearAll').hidden = !photos.length;
+  $('#clearAll').hidden = !localPhotos.length;
+  $('#sharedNote').hidden = !sharedAlbumUrl;
+  $('#ownPhotos').hidden = !!sharedAlbumUrl;
+  $('#albumActions').hidden = !(album && !sharedAlbumUrl);
+  if (!sharedAlbumUrl && albumError) $('#albumStatus').textContent = albumError;
   const span = settings.span;
   photos.forEach((p, i) => {
     const tile = document.createElement('div');
     tile.className = 'tile';
-    const url = URL.createObjectURL(p.thumb);
-    thumbUrls.push(url);
+    let url;
+    if (p.remote) { url = A.sized(p, 240, true); tile.classList.add('remote'); }
+    else { url = URL.createObjectURL(p.thumb); thumbUrls.push(url); }
     const lvl = settings.order === 'chrono' ? P.levelOfIndex(i, photos.length, span) : null;
     const d = new Date(p.date);
     const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     tile.innerHTML = `<img alt="" loading="lazy">${lvl ? `<span class="era">L${lvl}${lvl === span ? '+' : ''}</span>` : ''}
       <button class="del" title="Remove" aria-label="Remove photo">✕</button>
-      <div class="meta"><input type="date" title="Date taken (${p.dateSource}) — change to reorder" value="${iso}"></div>`;
-    tile.querySelector('img').src = url;
+      <div class="meta"><input type="date" ${p.remote ? 'disabled title="From the shared album"' : `title="Date taken (${p.dateSource}) — change to reorder"`} value="${iso}"></div>`;
+    const timg = tile.querySelector('img');
+    timg.referrerPolicy = 'no-referrer';
+    timg.src = url;
     tile.querySelector('.del').onclick = async () => { await P.deletePhoto(p.id); bitmapCache.delete(p.id); await refreshPhotos(); renderGrid(); };
     tile.querySelector('input').onchange = async (e) => {
       const [y, m, dd] = e.target.value.split('-').map(Number);
@@ -647,7 +714,7 @@ async function renderGrid() {
 }
 
 $('#clearAll').onclick = async () => {
-  if (!confirm(`Remove all ${photos.length} photos from this browser?`)) return;
+  if (!confirm(`Remove all ${localPhotos.length} uploaded photos from this browser?`)) return;
   await P.clearPhotos();
   bitmapCache.clear();
   layerPhoto.fill(null);
@@ -657,6 +724,40 @@ $('#clearAll').onclick = async () => {
   await refreshPhotos(); renderGrid();
   showPhoto(null);
 };
+
+// shared album link
+const albumInput = $('#albumUrl'), albumStatus = (t) => ($('#albumStatus').textContent = t);
+albumInput.value = settings.albumUrl;
+$('#relayUrl').value = settings.relay;
+$('#relayUrl').onchange = (e) => {
+  const v = e.target.value.trim();
+  if (v && !A.validRelay(v)) { albumStatus('Relay must be an https:// address containing {url}.'); return; }
+  settings.relay = v; save('pictris.settings', settings); albumStatus(v ? 'Relay saved.' : 'Using the default relays.');
+};
+async function useAlbum() {
+  const url = A.normalizeAlbumUrl(albumInput.value);
+  if (!url) { albumStatus('Paste a Google Photos shared album link (https://photos.app.goo.gl/…).'); return; }
+  albumStatus('Loading album…');
+  $('#albumUse').disabled = true;
+  settings.albumUrl = url; save('pictris.settings', settings);
+  A.forgetAlbum(url);
+  await refreshPhotos({ reloadAlbum: true });
+  $('#albumUse').disabled = false;
+  albumStatus(album ? `${album.title ? `“${album.title}”: ` : ''}${album.items.length} photos${album.items.length >= 300 ? ' (Google lists only the first ~300 of a large album)' : ''}.` : albumError);
+  renderGrid();
+}
+$('#albumUse').onclick = useAlbum;
+albumInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); useAlbum(); } });
+$('#albumRemove').onclick = async () => {
+  if (settings.albumUrl) A.forgetAlbum(settings.albumUrl);
+  settings.albumUrl = ''; save('pictris.settings', settings);
+  albumInput.value = ''; $('#shareUrl').hidden = true;
+  await refreshPhotos({ reloadAlbum: true });
+  albumStatus('Album removed.');
+  renderGrid();
+};
+$('#shareBtn').onclick = () => shareGame($('#albumStatus'));
+$('#menuShare').onclick = () => shareGame($('#menuShareStatus'));
 
 // Google Photos picker
 const gId = $('#gClientId');
@@ -700,12 +801,12 @@ $('#gPick').onclick = async () => {
 (async function boot() {
   renderBests();
   placeHud();
-  try { await refreshPhotos(); } catch (e) { console.warn('IndexedDB unavailable', e); }
+  await refreshPhotos();
   menuSlide(true);
   requestAnimationFrame(frame);
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   // Test hook for automated checks.
-  window.__pictris = { get game() { return game; }, startGame, refreshPhotos, P };
+  window.__pictris = { get game() { return game; }, get photos() { return photos; }, startGame, refreshPhotos, P };
 })();

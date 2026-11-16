@@ -44,6 +44,9 @@
         <button data-open="helpDlg">Controls</button>
       </div>
       <p id="photoHint" class="hint"></p>
+      <p id="sharedBar" class="hint" hidden>Playing a shared album. <a href="./">Use my own photos</a></p>
+      <div class="row" id="menuShareRow" hidden><button id="menuShare">Share this game + album</button></div>
+      <p id="menuShareStatus" class="status" aria-live="polite"></p>
       <p class="bests" id="bests"></p>
     </div>
   </section>
@@ -72,15 +75,41 @@
 
   <dialog id="photosDlg" class="panel wide">
     <form method="dialog" class="dlg-head"><h2>Photos</h2><button aria-label="Close">✕</button></form>
-    <p class="hint">Photos stay on this device (browser storage). Nothing is uploaded anywhere.
-      They are ordered by date taken, so early levels show the oldest photos and later levels the newest.</p>
+    <p class="hint">Photos are ordered by date taken, so early levels show the oldest and later levels the newest.
+      Uploaded photos stay in this browser; a shared album loads from Google Photos.</p>
+    <p id="sharedNote" class="hint note" hidden>You're playing a shared album, loaded from Google Photos. <a href="./">Switch to my own photos</a></p>
+    <div id="ownPhotos">
+    <div class="albumlink">
+      <h3>Google Photos shared album</h3>
+      <p class="hint">In Google Photos open an album → Share → Create link, then paste the link here. Photos load from Google as you play,
+        and you can send someone a link that opens the game with the same album.</p>
+      <div class="row">
+        <input id="albumUrl" type="url" placeholder="https://photos.app.goo.gl/…" spellcheck="false" autocomplete="off">
+        <button id="albumUse" type="button">Use album</button>
+      </div>
+      <div class="row" id="albumActions" hidden>
+        <button id="shareBtn" type="button" class="primary">Copy link to game + album</button>
+        <button id="albumRemove" type="button" class="danger">Remove album</button>
+      </div>
+      <input id="shareUrl" type="text" readonly hidden aria-label="Share link">
+      <p id="albumStatus" class="status" aria-live="polite"></p>
+      <details class="adv">
+        <summary>Advanced</summary>
+        <p class="hint">The album page is read through a relay, because Google blocks browsers from reading it directly. Public relays are used by default;
+          for reliability you can host your own (see <code>worker/relay.js</code>). Use <code>{url}</code> where the address goes.</p>
+        <label class="stack">Relay
+          <input id="relayUrl" type="text" placeholder="https://your-relay.workers.dev/?url={url}" spellcheck="false" autocomplete="off">
+        </label>
+      </details>
+    </div>
+    <h3>Photos on this device</h3>
     <div id="drop" class="drop">
       <p>Drop photos here, or</p>
       <label class="btn">Choose photos<input id="fileInput" type="file" accept="image/*" multiple hidden></label>
       <label class="btn">Choose a folder<input id="dirInput" type="file" webkitdirectory multiple hidden></label>
     </div>
     <details class="gp">
-      <summary>Import from Google Photos</summary>
+      <summary>Import from Google Photos (private copy on this device)</summary>
       <p class="hint">Opens Google Photos so you can pick photos (select a whole album with its checkbox). Copies are stored locally.
         Needs a one-time Google Cloud OAuth client ID for this site's address — see the README.</p>
       <label class="stack">OAuth client ID
@@ -91,6 +120,7 @@
         <button id="gPick" type="button" disabled>2. Pick photos</button>
       </div>
     </details>
+    </div>
     <p id="importStatus" class="status" aria-live="polite"></p>
     <div class="lib-head">
       <span id="libSummary"></span>

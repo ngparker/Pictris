@@ -45,16 +45,31 @@ DAS/ARR are adjustable in Settings.
 
 ## Adding photos
 
-**Upload (simplest):** Photos → *Choose photos* / *Choose a folder*, or drag files onto the page. Images are resized to ≤2048 px and stored in IndexedDB (localStorage is limited to ~5 MB, too small for photos). To bring in a Google Photos album this way: open the album → ⋮ → *Download all* → unzip → *Choose a folder*.
+Photos → three ways, which can be combined:
 
-**Google Photos import (Picker API):** picks photos in Google's own UI and copies them locally. One-time setup:
+**1. Google Photos shared album link (shareable).** In Google Photos: album → Share → Create link. Paste it under *Google Photos shared album* → *Use album*. Photos load from Google as you play (nothing is copied). *Copy link to game + album* gives a link like
+
+```
+https://<you>.github.io/Pictris/?album=https%3A%2F%2Fphotos.app.goo.gl%2F…
+```
+
+Whoever opens it plays with that album, without touching their own photo library or settings.
+
+How it works, and its limits:
+- Google has no API for shared-album links and blocks browsers from reading the album page (no CORS). The page is therefore read through a **relay**; only the album page goes through it, the images come straight from Google. Public relays are tried by default (allorigins, codetabs, corsproxy.io). They are third-party and can be slow or down. For reliability, deploy `worker/relay.js` as a free Cloudflare Worker and set it under *Advanced*.
+- The page format is undocumented and may change; the parser is in `src/album.js`.
+- Google lists roughly the first 300 items of an album on that page.
+- Anyone with the game link can see the album, exactly as with the album link itself.
+- Uploaded (device-only) photos are not part of a shared link.
+
+**2. Upload.** *Choose photos* / *Choose a folder*, or drag files onto the page. Images are resized to ≤2048 px and stored in IndexedDB in this browser only.
+
+**3. Google Photos Picker (private copy).** Picks photos in Google's own UI and copies them into this browser. One-time setup:
 
 1. [Google Cloud Console](https://console.cloud.google.com/) → create a project → *APIs & Services* → enable **Google Photos Picker API**.
 2. *OAuth consent screen*: External, add yourself (and family) as test users. Scope: `photospicker.mediaitems.readonly`.
 3. *Credentials* → *Create OAuth client ID* → **Web application** → add your site's origin (e.g. `https://you.github.io`, and `http://localhost:8080` for local testing) to *Authorized JavaScript origins*.
 4. Paste the client ID into Photos → *Import from Google Photos*, then *Sign in* → *Pick photos*.
-
-**Why not a shared-album link?** Google Photos has no public API for shared-album links, and the album pages can't be fetched from a browser (no CORS). Since March 2025 Google also restricts the Library API to app-created content, so the Picker API is the supported client-side route.
 
 ## Running locally
 
@@ -68,7 +83,7 @@ No build step, no dependencies.
 
 ## Hosting
 
-Any static host works. Note: GitHub Pages from a **private** repo needs a paid GitHub plan; Cloudflare Pages and Netlify can deploy private repos on free tiers. The service worker (`sw.js`) makes it work offline after first load and installable as an app.
+`.github/workflows/pages.yml` runs the tests and deploys to GitHub Pages on every push. One-time: repo *Settings → Pages → Build and deployment → Source: GitHub Actions*. The service worker (`sw.js`) makes the game work offline after first load (uploaded photos only) and installable as an app; after a deploy, the new version shows on the second visit.
 
 ## Tech
 
