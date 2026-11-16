@@ -1,0 +1,10 @@
+{
+  "name": "Pictris",
+  "short_name": "Pictris",
+  "description": "A calm falling-block puzzle game that weaves in your family photos.",
+  "start_url": "./",
+  "display": "fullscreen",
+  "background_color": "#0d0f16",
+  "theme_color": "#0d0f16",
+  "icons": [{ "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

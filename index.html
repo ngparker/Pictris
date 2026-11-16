@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Pictris</title>
+  <meta name="description" content="A calm falling-block puzzle game that weaves in your family photos.">
+  <meta name="theme-color" content="#0d0f16">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="gl" aria-label="Game board"></canvas>
+
+  <div id="hud" hidden>
+    <div class="label" id="holdLabel">Hold</div>
+    <div class="label" id="nextLabel">Next</div>
+    <div id="stats">
+      <div><span>Score</span><b id="score">0</b></div>
+      <div><span>Level</span><b id="level">1</b></div>
+      <div><span>Lines</span><b id="lines">0</b></div>
+      <div class="best"><span>Best</span><b id="best">0</b></div>
+    </div>
+    <button id="pauseBtn" class="icon-btn" title="Pause (Esc)" aria-label="Pause">❚❚</button>
+  </div>
+  <div id="toast" aria-live="polite"></div>
+  <div id="caption" aria-live="polite"></div>
+
+  <section id="menu" class="overlay">
+    <div class="card">
+      <h1>Pictris</h1>
+      <p class="sub">Stack blocks. Watch your family grow up.</p>
+      <div class="modes">
+        <button class="primary" data-start="marathon">Marathon<small>Speeds up every 10 lines</small></button>
+        <button class="primary" data-start="zen">Zen<small>Steady pace, no game over</small></button>
+      </div>
+      <label class="inline">Start level
+        <select id="startLevel"></select>
+      </label>
+      <div class="row">
+        <button data-open="photosDlg">Photos <span id="photoCount" class="pill">0</span></button>
+        <button data-open="settingsDlg">Settings</button>
+        <button data-open="helpDlg">Controls</button>
+      </div>
+      <p id="photoHint" class="hint"></p>
+      <p class="bests" id="bests"></p>
+    </div>
+  </section>
+
+  <section id="pause" class="overlay" hidden>
+    <div class="card small">
+      <h2>Paused</h2>
+      <button class="primary" data-act="resume">Resume</button>
+      <button data-act="restart">Restart <kbd>R</kbd></button>
+      <button data-open="settingsDlg">Settings</button>
+      <button data-act="menu">Quit to menu</button>
+    </div>
+  </section>
+
+  <section id="over" class="overlay" hidden>
+    <div class="card small">
+      <h2>Game over</h2>
+      <p class="big" id="overScore">0</p>
+      <p id="overDetail" class="hint"></p>
+      <button class="primary" data-act="restart">Play again <kbd>Enter</kbd></button>
+      <button data-act="menu">Menu</button>
+    </div>
+  </section>
+
+  <dialog id="photosDlg" class="panel wide">
+    <form method="dialog" class="dlg-head"><h2>Photos</h2><button aria-label="Close">✕</button></form>
+    <p class="hint">Photos stay on this device (browser storage). Nothing is uploaded anywhere.
+      They are ordered by date taken, so early levels show the oldest photos and later levels the newest.</p>
+    <div id="drop" class="drop">
+      <p>Drop photos here, or</p>
+      <label class="btn">Choose photos<input id="fileInput" type="file" accept="image/*" multiple hidden></label>
+      <label class="btn">Choose a folder<input id="dirInput" type="file" webkitdirectory multiple hidden></label>
+    </div>
+    <details class="gp">
+      <summary>Import from Google Photos</summary>
+      <p class="hint">Opens Google Photos so you can pick photos (select a whole album with its checkbox). Copies are stored locally.
+        Needs a one-time Google Cloud OAuth client ID for this site's address — see the README.</p>
+      <label class="stack">OAuth client ID
+        <input id="gClientId" type="text" placeholder="1234-abc.apps.googleusercontent.com" spellcheck="false" autocomplete="off">
+      </label>
+      <div class="row">
+        <button id="gConnect" type="button">1. Sign in to Google</button>
+        <button id="gPick" type="button" disabled>2. Pick photos</button>
+      </div>
+    </details>
+    <p id="importStatus" class="status" aria-live="polite"></p>
+    <div class="lib-head">
+      <span id="libSummary"></span>
+      <button id="clearAll" type="button" class="danger">Remove all</button>
+    </div>
+    <div id="grid" class="grid"></div>
+  </dialog>
+
+  <dialog id="settingsDlg" class="panel">
+    <form method="dialog" class="dlg-head"><h2>Settings</h2><button aria-label="Close">✕</button></form>
+    <div class="settings" id="settingsForm">
+      <h3>Photos</h3>
+      <label>Locked blocks
+        <select name="blockStyle"><option value="photo">Reveal the photo</option><option value="color">Plain colors</option></select></label>
+      <label>Photo order
+        <select name="order"><option value="chrono">Oldest → newest as you level</option><option value="shuffle">Shuffle</option></select></label>
+      <label>Levels to reach today's photos <input name="span" type="number" min="1" max="50"></label>
+      <label class="check"><input name="background" type="checkbox"> Photo in background</label>
+      <label>Background dimming <input name="dim" type="range" min="0" max="0.9" step="0.05"></label>
+      <label>Background softness <input name="blur" type="range" min="0" max="4" step="0.25"></label>
+      <label>Block color tint <input name="tint" type="range" min="0" max="1" step="0.05"></label>
+      <label>Board darkness <input name="boardOpacity" type="range" min="0.3" max="1" step="0.05"></label>
+      <label class="check"><input name="captions" type="checkbox"> Show photo date on level up</label>
+      <h3>Play</h3>
+      <label class="check"><input name="ghost" type="checkbox"> Ghost piece</label>
+      <label>Next pieces shown <input name="previews" type="number" min="1" max="5"></label>
+      <label>Auto-repeat delay (DAS, ms) <input name="das" type="number" min="0" max="400" step="1"></label>
+      <label>Auto-repeat rate (ARR, ms) <input name="arr" type="number" min="0" max="200" step="1"></label>
+      <label class="check"><input name="clearText" type="checkbox"> Show clear names (Quad, T-Spin…)</label>
+      <label class="check"><input name="reduceMotion" type="checkbox"> Reduce motion</label>
+      <h3>Sound</h3>
+      <label>Volume <input name="volume" type="range" min="0" max="1" step="0.05"></label>
+      <label class="check"><input name="moveSounds" type="checkbox"> Move/rotate clicks</label>
+      <div class="row"><button type="button" id="resetSettings">Reset to defaults</button></div>
+    </div>
+  </dialog>
+
+  <dialog id="helpDlg" class="panel">
+    <form method="dialog" class="dlg-head"><h2>Controls</h2><button aria-label="Close">✕</button></form>
+    <table class="keys">
+      <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Move</td></tr>
+      <tr><td><kbd>↓</kbd></td><td>Soft drop</td></tr>
+      <tr><td><kbd>Space</kbd></td><td>Hard drop</td></tr>
+      <tr><td><kbd>↑</kbd> <kbd>X</kbd></td><td>Rotate clockwise</td></tr>
+      <tr><td><kbd>Z</kbd> <kbd>Ctrl</kbd></td><td>Rotate counter-clockwise</td></tr>
+      <tr><td><kbd>A</kbd></td><td>Rotate 180°</td></tr>
+      <tr><td><kbd>Shift</kbd> <kbd>C</kbd></td><td>Hold</td></tr>
+      <tr><td><kbd>Esc</kbd> <kbd>P</kbd> <kbd>F1</kbd></td><td>Pause</td></tr>
+      <tr><td><kbd>M</kbd></td><td>Mute</td></tr>
+      <tr><td><kbd>R</kbd></td><td>Restart (when paused / game over)</td></tr>
+      <tr><td>Numpad</td><td><kbd>4</kbd>/<kbd>6</kbd> move, <kbd>2</kbd> soft, <kbd>8</kbd> hard, <kbd>1</kbd><kbd>5</kbd><kbd>9</kbd> CW, <kbd>3</kbd><kbd>7</kbd> CCW, <kbd>0</kbd> hold</td></tr>
+    </table>
+    <h3>Touch</h3>
+    <p class="hint">Drag sideways to move · tap to rotate · drag down to soft drop · flick down to hard drop · flick up to hold.</p>
+  </dialog>
+
+  <noscript><p class="nojs">Pictris needs JavaScript and WebGL2.</p></noscript>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
