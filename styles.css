@@ -40,8 +40,20 @@ kbd { display: inline-block; min-width: 1.6em; padding: 1px 6px; border: 1px sol
 #toast, #caption { position: fixed; left: 50%; transform: translateX(-50%); pointer-events: none; text-align: center;
   opacity: 0; transition: opacity .5s; white-space: nowrap; text-shadow: 0 1px 6px rgba(0,0,0,.7); }
 #toast { font-weight: 600; letter-spacing: .06em; font-size: 15px; }
-#caption { color: var(--fg); font-size: 13px; letter-spacing: .04em; }
-#toast.show, #caption.show { opacity: .92; }
+#toast.show { opacity: .92; }
+#caption { color: var(--muted); font-size: 12px; letter-spacing: .08em; transition: opacity 1.2s, color 1.2s; }
+#caption.show { opacity: .5; }
+#caption.bright { opacity: .95; color: var(--fg); }
+#hud { transition: opacity .4s; }
+body.celebrate #hud { opacity: .12; }
+.album figure { margin: 0; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; }
+.album figure img { width: 100%; height: min(62dvh, 640px); object-fit: contain; border-radius: 10px; background: rgba(0,0,0,.35); }
+.album figure button { font-size: 22px; padding: 10px 12px; }
+.album-cap { text-align: center; color: var(--muted); font-size: 13px; letter-spacing: .06em; margin: 8px 0; }
+.strip { display: flex; gap: 6px; overflow-x: auto; padding: 4px 2px; justify-content: safe center; }
+.strip button { padding: 0; border-radius: 8px; overflow: hidden; flex: 0 0 auto; opacity: .55; border-width: 2px; }
+.strip button[aria-current=true] { opacity: 1; border-color: var(--accent); }
+.strip img { display: block; width: 56px; height: 56px; object-fit: cover; }
 
 /* overlays */
 .overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px;

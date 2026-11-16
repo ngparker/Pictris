@@ -1,7 +1,10 @@
 // WebGL2 renderer: blurred photo backdrop + instanced-style batched rounded blocks.
 // Locked blocks in "photo" style act as windows onto the sharp photo behind the board.
 
-import { COLS, VISIBLE, HIDDEN, CELLS, TYPES, CLEAR_DELAY, LOCK_DELAY } from './game.js';
+import { COLS, VISIBLE, HIDDEN, CELLS, TYPES, CLEAR_DELAY, LOCK_DELAY, extent } from './game.js';
+
+export const PIECE_LAYERS = 48;
+const PIECE_TEX = 256;
 
 export const COLORS = {
   I: [0.42, 0.80, 0.86], J: [0.40, 0.52, 0.86], L: [0.91, 0.62, 0.34], O: [0.92, 0.82, 0.40],
@@ -17,7 +20,8 @@ precision highp float;
 in vec2 vUv; out vec4 o;
 uniform sampler2D uT0, uT1;
 uniform vec2 uC0, uC1;
-uniform float uH0, uH1, uMix, uDim, uBlur, uTime;
+uniform float uH0, uH1, uMix, uDim, uBlur, uTime, uReveal, uShine;
+uniform vec2 uF0, uF1;
 vec2 cover(vec2 uv, vec2 s){ return (uv-0.5)*s+0.5; }
 vec3 soft(sampler2D t, vec2 uv){
   vec3 c = vec3(0.);
@@ -38,25 +42,39 @@ void main(){
   c *= 1.-uDim;
   float v = smoothstep(1.15, 0.35, length(vUv-0.5));
   c *= mix(0.55, 1.0, v);
+  if (uReveal > 0.) {
+    // Level-up moment: pull focus and ease from cover-fit out to the whole photo.
+    vec2 p0 = cover(uv, mix(uC0, uF0, uReveal)), p1 = cover(uv, mix(uC1, uF1, uReveal));
+    vec2 e0 = smoothstep(vec2(0.), vec2(0.004), p0) * smoothstep(vec2(0.), vec2(0.004), 1.-p0);
+    vec2 e1 = smoothstep(vec2(0.), vec2(0.004), p1) * smoothstep(vec2(0.), vec2(0.004), 1.-p1);
+    float m0 = e0.x*e0.y*uH0, m1 = e1.x*e1.y*uH1;
+    vec3 sharp = mix(texture(uT0, p0).rgb, texture(uT1, p1).rgb, uMix);
+    float m = mix(m0, m1, uMix);
+    float band = exp(-pow((uv.x + uv.y*0.35 - (uShine*1.9 - 0.3))*5., 2.));
+    sharp += band*0.10;
+    c = mix(c*(1.-0.45*uReveal), sharp, m*uReveal);
+  }
   o = vec4(c,1.);
 }`;
 
 const Q_VS = `#version 300 es
-in vec2 aPos; in vec2 aLocal; in vec2 aSize; in vec4 aColor; in vec4 aParams;
+in vec2 aPos; in vec2 aLocal; in vec2 aSize; in vec4 aColor; in vec4 aParams; in vec4 aUv; in float aLayer;
 uniform vec2 uRes;
-out vec2 vLocal; out vec2 vSize; out vec4 vColor; out vec4 vParams;
+out vec2 vLocal; out vec2 vSize; out vec4 vColor; out vec4 vParams; out vec4 vUv; flat out float vLayer;
 void main(){
-  vLocal=aLocal; vSize=aSize; vColor=aColor; vParams=aParams;
+  vLocal=aLocal; vSize=aSize; vColor=aColor; vParams=aParams; vUv=aUv; vLayer=aLayer;
   vec2 c = aPos/uRes*2.-1.;
   gl_Position = vec4(c.x, -c.y, 0., 1.);
 }`;
 
-// params: x=mode (0 solid,1 photo,2 ghost,3 panel), y=flash, z=tint, w=radius(px)
+// params: x=mode (0 solid,1 reveal background photo,2 ghost,3 panel,4 piece photo), y=flash, z=tint, w=radius(px)
 const Q_FS = `#version 300 es
 precision highp float;
-in vec2 vLocal; in vec2 vSize; in vec4 vColor; in vec4 vParams;
+precision highp sampler2DArray;
+in vec2 vLocal; in vec2 vSize; in vec4 vColor; in vec4 vParams; in vec4 vUv; flat in float vLayer;
 out vec4 o;
 uniform sampler2D uT0, uT1;
+uniform sampler2DArray uArr;
 uniform vec2 uC0, uC1, uRes;
 uniform float uH0, uH1, uMix;
 vec2 cover(vec2 uv, vec2 s){ return (uv-0.5)*s+0.5; }
@@ -85,6 +103,14 @@ void main(){
     vec3 ph = mix(a,b,uMix);
     col = mix(ph, ph*col*1.6, vParams.z);
   }
+  if (mode == 4) {
+    vec3 ph = texture(uArr, vec3(mix(vUv.xy, vUv.zw, vLocal), vLayer)).rgb;
+    ph = mix(ph, ph*col*1.6, vParams.z*0.6);
+    float fw = max(1.5, vSize.x*0.075);
+    float edge0 = min(min(vLocal.x,1.-vLocal.x)*vSize.x, min(vLocal.y,1.-vLocal.y)*vSize.y);
+    float frame = 1.-smoothstep(fw-1., fw, edge0);
+    col = mix(ph, col, frame*0.9);
+  }
   float edge = min(min(vLocal.x,1.-vLocal.x)*vSize.x, min(vLocal.y,1.-vLocal.y)*vSize.y);
   float rim = 1.-smoothstep(0., max(2., vSize.x*0.13), edge);
   float side = (0.5-vLocal.y) + (0.5-vLocal.x)*0.5;
@@ -93,6 +119,24 @@ void main(){
   col = mix(col, vec3(1.), vParams.y);
   o = vec4(col*alpha*aa, alpha*aa);
 }`;
+
+const NO_UV = [0, 0, 1, 1];
+
+/** Pack each cell's position within the piece's extent (same encoding as Game.ext). */
+function packExtents(cells) {
+  const e = extent(cells);
+  return cells.map(([x, y]) => (x - e.x) | ((y - e.y) << 2) | ((e.w - 1) << 4) | ((e.h - 1) << 6));
+}
+
+/** UV rect of one cell: the piece's extent is cover-fitted into the square photo, then sliced. */
+function cellUv(ext) {
+  const ex = ext & 3, ey = (ext >> 2) & 3, w = ((ext >> 4) & 3) + 1, h = ((ext >> 6) & 3) + 1;
+  const a = w / h;
+  let u0 = 0, u1 = 1, v0 = 0, v1 = 1;
+  if (a >= 1) { v0 = 0.5 - 0.5 / a; v1 = 0.5 + 0.5 / a; } else { u0 = 0.5 - a / 2; u1 = 0.5 + a / 2; }
+  const du = (u1 - u0) / w, dv = (v1 - v0) / h;
+  return [u0 + ex * du, v0 + ey * dv, u0 + (ex + 1) * du, v0 + (ey + 1) * dv];
+}
 
 function compile(gl, vs, fs) {
   const p = gl.createProgram();
@@ -114,7 +158,7 @@ function compile(gl, vs, fs) {
   return { p, u };
 }
 
-const FLOATS = 14; // per vertex
+const FLOATS = 19; // per vertex
 
 export class Renderer {
   constructor(canvas) {
@@ -141,7 +185,7 @@ export class Renderer {
     this.data = new Float32Array(FLOATS * 6 * 1200);
     gl.bufferData(gl.ARRAY_BUFFER, this.data.byteLength, gl.DYNAMIC_DRAW);
     let off = 0;
-    for (const [name, size] of [['aPos', 2], ['aLocal', 2], ['aSize', 2], ['aColor', 4], ['aParams', 4]]) {
+    for (const [name, size] of [['aPos', 2], ['aLocal', 2], ['aSize', 2], ['aColor', 4], ['aParams', 4], ['aUv', 4], ['aLayer', 1]]) {
       const l = gl.getAttribLocation(this.q.p, name);
       gl.enableVertexAttribArray(l);
       gl.vertexAttribPointer(l, size, gl.FLOAT, false, FLOATS * 4, off * 4);
@@ -150,11 +194,21 @@ export class Renderer {
     gl.bindVertexArray(null);
 
     this.tex = [this.makeTex(), this.makeTex()];
+    this.arr = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.arr);
+    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, Math.log2(PIECE_TEX) + 1, gl.RGBA8, PIECE_TEX, PIECE_TEX, PIECE_LAYERS);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.square = document.createElement('canvas');
+    this.square.width = this.square.height = PIECE_TEX;
     this.slots = [null, null]; // {w,h}
     this.cur = 0;
     this.mix = 0; // 0 = show cur, 1 = show other
     this.fading = false;
     this.n = 0;
+    this.fade = 1;
     this.layout = null;
   }
 
@@ -187,6 +241,20 @@ export class Renderer {
     this.fading = true;
     this.mix = instant ? 1 : 0;
     if (instant) this.finishFade();
+  }
+
+  /** Upload a center-cropped square of `bitmap` into piece-photo layer `layer`. */
+  setPieceLayer(layer, bitmap) {
+    const gl = this.gl;
+    const c = this.square.getContext('2d');
+    const side = Math.min(bitmap.width, bitmap.height);
+    // Bias the crop slightly upward: faces tend to sit above center.
+    const sx = (bitmap.width - side) / 2, sy = Math.max(0, (bitmap.height - side) * 0.35);
+    c.imageSmoothingQuality = 'high';
+    c.drawImage(bitmap, sx, sy, side, side, 0, 0, PIECE_TEX, PIECE_TEX);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.arr);
+    gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, layer, PIECE_TEX, PIECE_TEX, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.square);
+    gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
   }
 
   finishFade() {
@@ -236,6 +304,13 @@ export class Renderer {
     return this.layout;
   }
 
+  /** Scale that shows the whole photo with a small margin. */
+  fit(slot) {
+    const c = this.cover(slot);
+    const m = Math.min(c[0], c[1]) * 0.94;
+    return [c[0] / m, c[1] / m];
+  }
+
   cover(slot) {
     const s = this.slots[slot];
     if (!s) return [1, 1];
@@ -243,8 +318,9 @@ export class Renderer {
     return I > A ? [A / I, 1] : [1, I / A];
   }
 
-  quad(x, y, w, h, color, alpha, mode, flash = 0, tint = 0, radius = 0) {
+  quad(x, y, w, h, color, alpha, mode, flash = 0, tint = 0, radius = 0, uv = NO_UV, layer = 0) {
     if (this.n >= 1200) return;
+    alpha *= this.fade;
     const d = this.data;
     let o = this.n * 6 * FLOATS;
     const corners = [[0, 0], [1, 0], [0, 1], [0, 1], [1, 0], [1, 1]];
@@ -254,6 +330,7 @@ export class Renderer {
       d[o++] = w; d[o++] = h;
       d[o++] = color[0]; d[o++] = color[1]; d[o++] = color[2]; d[o++] = alpha;
       d[o++] = mode; d[o++] = flash; d[o++] = tint; d[o++] = radius;
+      d[o++] = uv[0]; d[o++] = uv[1]; d[o++] = uv[2]; d[o++] = uv[3]; d[o++] = layer;
     }
     this.n++;
   }
@@ -261,18 +338,21 @@ export class Renderer {
   block(x, y, size, type, opts = {}) {
     const g = Math.max(1, Math.round(size * 0.06));
     const r = Math.max(1, size * 0.14);
+    let mode = opts.mode ?? 0, uv = NO_UV;
+    if (opts.tag != null && opts.tag >= 0 && opts.ext != null) { mode = 4; uv = cellUv(opts.ext); }
     this.quad(x + g / 2, y + g / 2, size - g, size - g, opts.color || COLORS[type], opts.alpha ?? 1,
-      opts.mode ?? 0, opts.flash || 0, opts.tint || 0, r);
+      mode, opts.flash || 0, opts.tint || 0, r, uv, Math.max(0, opts.tag ?? 0));
   }
 
-  piecePreview(type, box, cy, size, alpha = 1, cx = box.x + box.w / 2) {
+  piecePreview(type, box, cy, size, alpha = 1, cx = box.x + box.w / 2, tag = -1, tint = 0) {
     if (!type) return;
     const cells = CELLS[type][0];
+    const ext = packExtents(cells);
     const xs = cells.map((c) => c[0]), ys = cells.map((c) => c[1]);
     const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
     const pw = (maxX - minX + 1) * size, ph = (maxY - minY + 1) * size;
     const ox = cx - pw / 2, oy = cy - ph / 2;
-    for (const [x, y] of cells) this.block(ox + (x - minX) * size, oy + (y - minY) * size, size, type, { alpha });
+    cells.forEach(([x, y], i) => this.block(ox + (x - minX) * size, oy + (y - minY) * size, size, type, { alpha, tag, ext: ext[i], tint }));
   }
 
   /**
@@ -302,6 +382,11 @@ export class Renderer {
     gl.uniform1f(U.uDim, game ? s.dim : s.dim * 0.6);
     gl.uniform1f(U.uBlur, game ? s.blur : Math.min(s.blur, 0.25));
     gl.uniform1f(U.uTime, s.reduceMotion ? 0 : v.time / 1000);
+    const reveal = v.reveal || 0;
+    this.fade = 1 - reveal;
+    gl.uniform1f(U.uReveal, reveal);
+    gl.uniform1f(U.uShine, s.reduceMotion ? -1 : v.shine || 0);
+    gl.uniform2fv(U.uF0, this.fit(t0)); gl.uniform2fv(U.uF1, this.fit(t1));
     gl.bindVertexArray(this.bgVao);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
@@ -318,7 +403,8 @@ export class Renderer {
     for (let y = 1; y < VISIBLE; y++) this.quad(bx, by + y * cell - 0.5, bw, 1, gc, 0.035, 3);
 
     if (game) {
-      const photoBlocks = s.blockStyle === 'photo' && (has0 || has1);
+      const photoBlocks = s.blockStyle === 'reveal' && (has0 || has1);
+      const piecePhotos = s.blockStyle === 'pieces';
       const clearing = game.clearing;
       const clearT = clearing ? 1 - clearing.t / CLEAR_DELAY : 0;
       for (let y = HIDDEN; y < HIDDEN + VISIBLE; y++) {
@@ -328,11 +414,13 @@ export class Renderer {
           if (!c) continue;
           const type = TYPES[c - 1];
           const px = bx + x * cell, py = by + (y - HIDDEN) * cell;
+          const i = y * COLS + x;
+          const tag = piecePhotos ? game.tags[i] : -1, ext = game.ext[i];
           if (isClearing) {
             const k = s.reduceMotion ? 0.6 : Math.sin(Math.min(1, clearT) * Math.PI) * 0.85;
-            this.block(px, py, cell, type, { mode: photoBlocks ? 1 : 0, tint: s.tint, flash: k, alpha: 1 - clearT * 0.7 });
+            this.block(px, py, cell, type, { mode: photoBlocks ? 1 : 0, tint: s.tint, flash: k, alpha: 1 - clearT * 0.7, tag, ext });
           } else {
-            this.block(px, py, cell, type, { mode: photoBlocks ? 1 : 0, tint: s.tint, alpha: game.over ? 0.55 : 1 });
+            this.block(px, py, cell, type, { mode: photoBlocks ? 1 : 0, tint: s.tint, alpha: game.over ? 0.55 : 1, tag, ext });
           }
         }
       }
@@ -347,30 +435,33 @@ export class Renderer {
           }
         }
         const lockFade = game.lockTimer > 0 ? Math.min(1, game.lockTimer / LOCK_DELAY) * 0.25 : 0;
-        for (const [cx, cy] of cells) {
+        const ext = packExtents(cells);
+        const tag = piecePhotos ? a.tag : -1;
+        cells.forEach(([cx, cy], i) => {
           const y = a.y + cy;
-          if (y >= HIDDEN - 2) this.block(bx + (a.x + cx) * cell, by + (y - HIDDEN) * cell, cell, a.type, { flash: lockFade * 0.4 });
-        }
+          if (y >= HIDDEN - 2) this.block(bx + (a.x + cx) * cell, by + (y - HIDDEN) * cell, cell, a.type, { flash: lockFade * 0.4, tag, ext: ext[i], tint: s.tint });
+        });
       }
       // hold & next
       const mini = cell * 0.62;
       const nx = L.next;
+      const pt = (t) => (piecePhotos ? t : -1);
       if (nx.horizontal) {
         const hm = cell * 0.5;
-        this.piecePreview(game.hold, L.hold, L.hold.y + L.hold.h * 0.6, hm, game.canHold ? 1 : 0.35);
+        this.piecePreview(game.hold, L.hold, L.hold.y + L.hold.h * 0.6, hm, game.canHold ? 1 : 0.35, undefined, pt(game.holdTag), s.tint);
         const qn = Math.min(3, s.previews);
         const slot = (nx.w - cell * 0.6) / qn;
         for (let i = 0; i < qn; i++) {
           this.piecePreview(game.queue[i], nx, nx.y + nx.h * 0.6, i === 0 ? hm : hm * 0.85, i === 0 ? 1 : 0.8,
-            nx.x + cell * 0.3 + slot * (i + 0.5));
+            nx.x + cell * 0.3 + slot * (i + 0.5), pt(game.queueTags[i]), s.tint);
         }
       } else {
-        this.piecePreview(game.hold, L.hold, L.hold.y + L.hold.h * 0.56, mini, game.canHold ? 1 : 0.35);
+        this.piecePreview(game.hold, L.hold, L.hold.y + L.hold.h * 0.56, mini, game.canHold ? 1 : 0.35, undefined, pt(game.holdTag), s.tint);
         const qn = Math.min(5, s.previews);
         for (let i = 0; i < qn; i++) {
           const sz = i === 0 ? cell * 0.75 : mini * 0.92;
           const cy = nx.y + cell * 1.9 + (i === 0 ? 0 : cell * 0.9 + i * cell * 2.3);
-          this.piecePreview(game.queue[i], nx, cy, sz, i === 0 ? 1 : 0.8);
+          this.piecePreview(game.queue[i], nx, cy, sz, i === 0 ? 1 : 0.8, undefined, pt(game.queueTags[i]), s.tint);
         }
       }
     }
@@ -386,6 +477,8 @@ export class Renderer {
     const Q = this.q.u;
     gl.uniform2f(Q.uRes, L.W, L.H);
     gl.uniform1i(Q.uT0, 0); gl.uniform1i(Q.uT1, 1);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.arr);
+    gl.uniform1i(Q.uArr, 2);
     gl.uniform2fv(Q.uC0, this.cover(t0)); gl.uniform2fv(Q.uC1, this.cover(t1));
     gl.uniform1f(Q.uH0, has0); gl.uniform1f(Q.uH1, has1);
     gl.uniform1f(Q.uMix, this.fading ? this.mix : 0);

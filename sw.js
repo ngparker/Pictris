@@ -1,5 +1,5 @@
 // Offline support: cache the app shell, serve stale-while-revalidate.
-const CACHE = 'pictris-v1';
+const CACHE = 'pictris-v2';
 const SHELL = ['./', 'index.html', 'styles.css', 'manifest.webmanifest', 'icons/icon.svg',
   'src/main.js', 'src/game.js', 'src/renderer.js', 'src/photos.js', 'src/gphotos.js', 'src/audio.js'];
 

@@ -52,6 +52,7 @@
     <div class="card small">
       <h2>Paused</h2>
       <button class="primary" data-act="resume">Resume</button>
+      <button data-open="albumDlg">Photos so far <kbd>V</kbd></button>
       <button data-act="restart">Restart <kbd>R</kbd></button>
       <button data-open="settingsDlg">Settings</button>
       <button data-act="menu">Quit to menu</button>
@@ -64,6 +65,7 @@
       <p class="big" id="overScore">0</p>
       <p id="overDetail" class="hint"></p>
       <button class="primary" data-act="restart">Play again <kbd>Enter</kbd></button>
+      <button data-open="albumDlg">Photos this game <kbd>V</kbd></button>
       <button data-act="menu">Menu</button>
     </div>
   </section>
@@ -101,17 +103,19 @@
     <form method="dialog" class="dlg-head"><h2>Settings</h2><button aria-label="Close">✕</button></form>
     <div class="settings" id="settingsForm">
       <h3>Photos</h3>
-      <label>Locked blocks
-        <select name="blockStyle"><option value="photo">Reveal the photo</option><option value="color">Plain colors</option></select></label>
+      <label>Blocks
+        <select name="blockStyle"><option value="reveal">Lenses: landed blocks bring the photo into focus</option><option value="pieces">A photo on every piece</option><option value="color">Plain colors</option></select></label>
       <label>Photo order
         <select name="order"><option value="chrono">Oldest → newest as you level</option><option value="shuffle">Shuffle</option></select></label>
       <label>Levels to reach today's photos <input name="span" type="number" min="1" max="50"></label>
       <label class="check"><input name="background" type="checkbox"> Photo in background</label>
       <label>Background dimming <input name="dim" type="range" min="0" max="0.9" step="0.05"></label>
       <label>Background softness <input name="blur" type="range" min="0" max="4" step="0.25"></label>
-      <label>Block color tint <input name="tint" type="range" min="0" max="1" step="0.05"></label>
+      <label>Piece color tint <input name="tint" type="range" min="0" max="1" step="0.05"></label>
       <label>Board darkness <input name="boardOpacity" type="range" min="0.3" max="1" step="0.05"></label>
-      <label class="check"><input name="captions" type="checkbox"> Show photo date on level up</label>
+      <label class="check"><input name="celebrate" type="checkbox"> Pause briefly on level up to show the whole photo</label>
+      <label class="check"><input name="avoidRepeats" type="checkbox"> Prefer photos not shown in earlier games</label>
+      <label class="check"><input name="captions" type="checkbox"> Show photo date</label>
       <h3>Play</h3>
       <label class="check"><input name="ghost" type="checkbox"> Ghost piece</label>
       <label>Next pieces shown <input name="previews" type="number" min="1" max="5"></label>
@@ -126,6 +130,18 @@
     </div>
   </dialog>
 
+  <dialog id="albumDlg" class="panel wide album">
+    <form method="dialog" class="dlg-head"><h2>Photos this game</h2><button aria-label="Close">✕</button></form>
+    <p id="albumEmpty" class="hint" hidden>No photos yet. Add some from the menu and they will collect here as you level up.</p>
+    <figure id="albumFig">
+      <button type="button" id="albumPrev" aria-label="Previous photo">‹</button>
+      <img id="albumImg" alt="">
+      <button type="button" id="albumNext" aria-label="Next photo">›</button>
+    </figure>
+    <p id="albumCap" class="album-cap"></p>
+    <div id="albumStrip" class="strip"></div>
+  </dialog>
+
   <dialog id="helpDlg" class="panel">
     <form method="dialog" class="dlg-head"><h2>Controls</h2><button aria-label="Close">✕</button></form>
     <table class="keys">
@@ -138,6 +154,7 @@
       <tr><td><kbd>Shift</kbd> <kbd>C</kbd></td><td>Hold</td></tr>
       <tr><td><kbd>Esc</kbd> <kbd>P</kbd> <kbd>F1</kbd></td><td>Pause</td></tr>
       <tr><td><kbd>M</kbd></td><td>Mute</td></tr>
+      <tr><td><kbd>V</kbd></td><td>View photos so far (when paused / game over)</td></tr>
       <tr><td><kbd>R</kbd></td><td>Restart (when paused / game over)</td></tr>
       <tr><td>Numpad</td><td><kbd>4</kbd>/<kbd>6</kbd> move, <kbd>2</kbd> soft, <kbd>8</kbd> hard, <kbd>1</kbd><kbd>5</kbd><kbd>9</kbd> CW, <kbd>3</kbd><kbd>7</kbd> CCW, <kbd>0</kbd> hold</td></tr>
     </table>

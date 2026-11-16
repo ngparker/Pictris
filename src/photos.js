@@ -186,25 +186,32 @@ export async function storageEstimate() {
 // ---------- timeline ----------
 
 /**
- * Pick the photo for a level. Chronological: the library is split into `span` equal
- * eras (oldest first); level 1 shows the earliest era, level `span`+ the latest.
- * A per-game seed picks a random photo inside the era so each game varies.
- * Shuffle: a fixed per-game permutation.
+ * Pick the photo for a level.
+ * Chronological: the library is split into `span` equal eras (oldest first); level 1 draws
+ * from the earliest era, level `span`+ from the latest (`loop` wraps around instead).
+ * Shuffle: draws from the whole library.
+ * Within the candidates, photos in `exclude` (already used this game) are skipped when
+ * possible, then the least-recently-seen ones (`seen`: id -> timestamp) are preferred, and
+ * `seed` picks at random among those. So every game differs and repeats are spread out.
  */
-export function photoForLevel(photos, level, { order = 'chrono', span = 15, seed = 0, loop = false } = {}) {
+export function photoForLevel(photos, level, { order = 'chrono', span = 15, seed = 0, loop = false, seen = {}, exclude = null } = {}) {
   const n = photos.length;
   if (!n) return null;
-  let L = level - 1;
-  if (loop) L = L % span;
-  if (order === 'shuffle') {
-    const idx = (hash(seed) + L * 7919) % n;
-    return photos[(idx + n) % n];
+  let cands = photos;
+  if (order !== 'shuffle') {
+    const L = loop ? (level - 1) % span : Math.min(level - 1, span - 1);
+    const lo = Math.floor((L * n) / span);
+    const hi = Math.max(lo + 1, Math.floor(((L + 1) * n) / span));
+    cands = photos.slice(Math.min(lo, n - 1), Math.min(hi, n));
   }
-  L = Math.min(L, span - 1);
-  const lo = Math.floor((L * n) / span);
-  const hi = Math.max(lo + 1, Math.floor(((L + 1) * n) / span));
-  const pick = lo + (hash(seed * 31 + L) % (hi - lo));
-  return photos[Math.min(pick, n - 1)];
+  if (exclude && exclude.size) {
+    const fresh = cands.filter((p) => !exclude.has(p.id));
+    if (fresh.length) cands = fresh;
+  }
+  let oldest = Infinity;
+  for (const p of cands) oldest = Math.min(oldest, seen[p.id] || 0);
+  cands = cands.filter((p) => (seen[p.id] || 0) === oldest);
+  return cands[hash(seed * 31 + level) % cands.length];
 }
 
 /** The first level (chronological order) at which photo index i can appear. */

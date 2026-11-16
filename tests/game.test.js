@@ -151,7 +151,7 @@ test('photo timeline: levels map oldest→newest and grid labels agree', async (
     let prev = -1;
     for (let L = 1; L <= 20; L++) {
       const p = photoForLevel(photos, L, { span: 15, seed: 3 });
-      assert.ok(p.id >= prev, 'non-decreasing');
+      if (L <= 15) assert.ok(p.id >= prev, 'non-decreasing');
       const lab = levelOfIndex(p.id, n, 15);
       if (n >= 15) assert.equal(lab, Math.min(L, 15));
       else assert.ok(lab <= Math.min(L, 15));
@@ -160,4 +160,52 @@ test('photo timeline: levels map oldest→newest and grid labels agree', async (
     assert.equal(photoForLevel(photos, 1, { span: 15 }).id < Math.max(1, n / 15) + 1, true);
     assert.equal(photoForLevel(photos, 15, { span: 15, seed: 9 }).id >= Math.floor((14 * n) / 15), true);
   }
+});
+
+test('piece tags follow queue, hold, lock and line clears', () => {
+  let n = 100;
+  const g = new Game({ seed: 13, tagger: () => n++ });
+  const firstTag = g.active.tag;
+  const nextTag = g.queueTags[0];
+  assert.equal(g.queue.length, g.queueTags.length);
+  g.holdPiece();
+  assert.equal(g.holdTag, firstTag);
+  assert.equal(g.active.tag, nextTag);
+  // lock an I piece on top of a nearly-full row; the surviving row above should keep its tags after the clear
+  g.clearBoard();
+  fill(g, ROWS - 1, [0, 1, 2, 3]);
+  g.board[(ROWS - 2) * COLS + 9] = 1; g.tags[(ROWS - 2) * COLS + 9] = 7;
+  g.active = { type: 'I', rot: 0, x: 0, y: 0, tag: 42 };
+  g.hardDrop();
+  assert.equal(g.tags[(ROWS - 1) * COLS + 0], 42);
+  assert.equal(g.ext[(ROWS - 1) * COLS + 3], 3 | (0 << 2) | (3 << 4) | (0 << 6));
+  g.tick(CLEAR_DELAY + 1);
+  assert.equal(g.tags[(ROWS - 1) * COLS + 9], 7, 'row shifted down with its tag');
+  assert.equal(g.tags[(ROWS - 1) * COLS + 0], -1);
+});
+
+test('photo picker: random within era per game, avoids used and recently seen photos', async () => {
+  const { photoForLevel } = await import('../src/photos.js');
+  const photos = Array.from({ length: 150 }, (_, i) => ({ id: 'p' + i, date: i }));
+  const idx = (p) => +p.id.slice(1);
+  // level 3 of 15 -> photos 20..29
+  const seenIds = new Set();
+  for (let seed = 1; seed <= 40; seed++) {
+    const p = photoForLevel(photos, 3, { seed });
+    assert.ok(idx(p) >= 20 && idx(p) < 30);
+    seenIds.add(p.id);
+  }
+  assert.ok(seenIds.size >= 5, 'different games pick different photos');
+  // all but one seen before -> the unseen one is chosen
+  const seen = {};
+  for (let i = 20; i < 30; i++) if (i !== 27) seen['p' + i] = 1000 + i;
+  assert.equal(photoForLevel(photos, 3, { seed: 5, seen }).id, 'p27');
+  // everything seen -> least recently seen
+  seen.p27 = 5000;
+  assert.equal(photoForLevel(photos, 3, { seed: 5, seen }).id, 'p20');
+  // exclude wins over seen
+  assert.notEqual(photoForLevel(photos, 3, { seed: 5, seen, exclude: new Set(['p20']) }).id, 'p20');
+  // zen loops back to the first era; marathon stays in the last
+  assert.ok(idx(photoForLevel(photos, 16, { seed: 2, loop: true })) < 10);
+  assert.ok(idx(photoForLevel(photos, 16, { seed: 2 })) >= 140);
 });

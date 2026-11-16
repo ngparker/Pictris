@@ -1,5 +1,5 @@
 import { Game, LINES_PER_LEVEL } from './game.js';
-import { Renderer } from './renderer.js';
+import { Renderer, PIECE_LAYERS } from './renderer.js';
 import { Sound } from './audio.js';
 import * as P from './photos.js';
 import * as G from './gphotos.js';
@@ -9,15 +9,17 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 
 // ---------------- settings ----------------
 const DEFAULTS = {
-  blockStyle: 'photo', order: 'chrono', span: 15, background: true, dim: 0.45, blur: 1.25, tint: 0.3,
+  blockStyle: 'reveal', order: 'chrono', span: 15, background: true, dim: 0.45, blur: 1.5, tint: 0.15,
   boardOpacity: 0.72, captions: true, ghost: true, previews: 5, das: 167, arr: 33, clearText: true,
   reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, volume: 0.5, moveSounds: false,
-  startLevel: 1, gClientId: '',
+  startLevel: 1, gClientId: '', celebrate: true, avoidRepeats: true,
 };
 const load = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return { ...d }; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
 let settings = load('pictris.settings', DEFAULTS);
 let best = load('pictris.best', { marathon: 0, zen: 0 });
+let seen = load('pictris.seen', {}); // photo id -> last time it was the level photo
+if (settings.blockStyle === 'photo') settings.blockStyle = 'reveal';
 
 // ---------------- core objects ----------------
 const canvas = $('#gl');
@@ -44,11 +46,71 @@ async function bitmapFor(rec) {
   if (bitmapCache.has(rec.id)) return bitmapCache.get(rec.id);
   const bmp = await createImageBitmap(rec.blob);
   bitmapCache.set(rec.id, bmp);
-  if (bitmapCache.size > 6) {
-    const [k, v] = bitmapCache.entries().next().value;
-    if (k !== rec.id) { v.close?.(); bitmapCache.delete(k); }
-  }
+  // Evict without close(): an in-flight caller may still be about to upload it; GC reclaims it.
+  if (bitmapCache.size > 16) bitmapCache.delete(bitmapCache.keys().next().value);
   return bmp;
+}
+
+// ---- photos on pieces: a pool of same-era photos, uploaded into texture-array layers ----
+const layerPhoto = new Array(PIECE_LAYERS).fill(null);
+const layerStamp = new Array(PIECE_LAYERS).fill(0);
+let layerClock = 0;
+let pool = []; // layer indices ready for new pieces
+let lastTag = -1;
+let poolGen = 0;
+
+function referencedLayers() {
+  const set = new Set(pool);
+  if (!game) return set;
+  for (const t of game.tags) if (t >= 0) set.add(t);
+  for (const t of game.queueTags) if (t >= 0) set.add(t);
+  if (game.holdTag >= 0) set.add(game.holdTag);
+  if (game.active?.tag >= 0) set.add(game.active.tag);
+  return set;
+}
+
+/** Up to 8 photos chronologically around the era photo for this level. */
+function eraPhotos(level, mode) {
+  const center = photoForGame(level, mode);
+  if (!center) return [];
+  if (settings.order === 'shuffle') {
+    const at = photos.indexOf(center);
+    return Array.from({ length: Math.min(8, photos.length) }, (_, i) => photos[(at + i * 7) % photos.length]);
+  }
+  const idx = photos.indexOf(center);
+  const start = Math.max(0, Math.min(idx - 3, photos.length - 8));
+  return photos.slice(start, start + 8);
+}
+
+async function preparePool(level, mode) {
+  const gen = ++poolGen;
+  const recs = eraPhotos(level, mode);
+  const ready = [];
+  for (const rec of recs) {
+    let layer = layerPhoto.indexOf(rec.id);
+    if (layer < 0) {
+      const used = referencedLayers();
+      for (let i = 0; i < PIECE_LAYERS; i++) {
+        if (used.has(i) || ready.includes(i)) continue;
+        if (layer < 0 || layerStamp[i] < layerStamp[layer]) layer = i;
+      }
+      if (layer < 0) continue;
+      try {
+        renderer.setPieceLayer(layer, await bitmapFor(rec));
+        layerPhoto[layer] = rec.id;
+      } catch { continue; }
+    }
+    layerStamp[layer] = ++layerClock;
+    ready.push(layer);
+  }
+  if (gen === poolGen && ready.length) pool = ready;
+}
+
+function pieceTag() {
+  if (!pool.length) return -1;
+  let t = pool[Math.floor(Math.random() * pool.length)];
+  if (t === lastTag && pool.length > 1) t = pool[(pool.indexOf(t) + 1) % pool.length];
+  return (lastTag = t);
 }
 
 async function showPhoto(rec, instant = false) {
@@ -67,11 +129,34 @@ async function showPhoto(rec, instant = false) {
   }
 }
 
-function photoForGame(level) {
-  return P.photoForLevel(photos, level, { order: settings.order, span: settings.span, seed, loop: game?.mode === 'zen' });
+// The photo for each level is chosen once per game, then remembered.
+let picks = new Map(); // level -> photo record
+let gameShown = []; // [{ rec, level }] in the order shown this game
+function photoForGame(level, mode = game?.mode) {
+  if (picks.has(level)) return picks.get(level);
+  const rec = P.photoForLevel(photos, level, {
+    order: settings.order, span: settings.span, seed, loop: mode === 'zen',
+    seen: settings.avoidRepeats ? seen : {}, exclude: new Set([...picks.values()].map((r) => r.id)),
+  });
+  if (rec) picks.set(level, rec);
+  return rec;
+}
+
+/** Make `level`'s photo the current one, record it, and warm up the next. */
+function showLevelPhoto(level, mode = game?.mode) {
+  const rec = photoForGame(level, mode);
+  showPhoto(rec);
+  setCaption(rec);
+  if (!rec) return;
+  if (!gameShown.some((g) => g.level === level)) gameShown.push({ rec, level });
+  seen[rec.id] = Date.now();
+  save('pictris.seen', seen);
+  const next = photoForGame(level + 1, mode);
+  if (next) bitmapFor(next).catch(() => {});
 }
 
 const fmtDate = (ms) => new Date(ms).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+const fmtDay = (ms) => new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
 
 async function refreshPhotos() {
   photos = await P.listPhotos();
@@ -87,6 +172,7 @@ function menuSlide(instant = false) {
   if (!photos.length) return showPhoto(null, instant);
   const rec = photos[Math.floor(Math.random() * photos.length)];
   showPhoto(rec, instant);
+  setCaption(rec);
 }
 
 // ---------------- HUD ----------------
@@ -119,7 +205,7 @@ function placeHud() {
   $('#caption').style.top = px(L.by + L.bh + L.cell * 0.35);
 }
 
-let toastTimer, captionTimer;
+let toastTimer;
 function toast(text) {
   if (!settings.clearText) return;
   const t = $('#toast');
@@ -128,12 +214,40 @@ function toast(text) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), 1100);
 }
-function caption(text) {
+/** The date of the current photo, shown small and dim under the board. */
+function setCaption(rec, bright = false) {
   const c = $('#caption');
-  c.textContent = text;
-  c.classList.add('show');
-  clearTimeout(captionTimer);
-  captionTimer = setTimeout(() => c.classList.remove('show'), 3500);
+  const on = !!rec && settings.captions;
+  if (on) c.textContent = fmtDate(rec.date);
+  c.classList.toggle('show', on);
+  c.classList.toggle('bright', on && bright);
+}
+
+// Level-up moment: the board fades, the finished photo comes into full focus, then the next one drifts in.
+const CEL = { in: 450, hold: 1500, out: 700 };
+let celebrate = null; // { t, level, switched }
+const ease = (x) => x * x * (3 - 2 * x);
+function stepCelebrate(dt) {
+  const c = celebrate;
+  c.t += dt;
+  if (!c.switched && c.t >= CEL.in + CEL.hold) {
+    c.switched = true;
+    showLevelPhoto(c.level);
+    document.body.classList.remove('celebrate');
+  }
+  if (c.t >= CEL.in + CEL.hold + CEL.out) { celebrate = null; return; }
+}
+function revealAmount() {
+  if (!celebrate) return 0;
+  const t = celebrate.t;
+  if (t < CEL.in) return ease(t / CEL.in);
+  if (t < CEL.in + CEL.hold) return 1;
+  return 1 - ease(Math.min(1, (t - CEL.in - CEL.hold) / CEL.out));
+}
+function endCelebration() {
+  if (celebrate && !celebrate.switched) showLevelPhoto(celebrate.level);
+  celebrate = null;
+  document.body.classList.remove('celebrate');
 }
 
 // ---------------- game flow ----------------
@@ -157,9 +271,14 @@ function onEvent(type, d) {
     case 'perfect': toast('Perfect clear'); break;
     case 'levelup': {
       sound.levelUp();
-      const rec = photoForGame(d.level);
-      showPhoto(rec);
-      if (rec && settings.captions) caption(`Level ${d.level} · ${fmtDate(rec.date)}`);
+      preparePool(d.level);
+      if (settings.celebrate && currentPhotoId !== null) {
+        celebrate = { t: 0, level: d.level, switched: false };
+        document.body.classList.add('celebrate');
+        setCaption(photos.find((p) => p.id === currentPhotoId), true);
+      } else {
+        showLevelPhoto(d.level);
+      }
       break;
     }
     case 'zenReset': toast('Fresh board'); break;
@@ -167,9 +286,19 @@ function onEvent(type, d) {
   }
 }
 
-function startGame(mode = game?.mode || 'marathon') {
+let starting = false;
+async function startGame(mode = game?.mode || 'marathon') {
+  if (starting) return;
+  starting = true;
   seed = (Math.random() * 2 ** 31) | 0;
-  game = new Game({ mode, startLevel: settings.startLevel, seed, onEvent });
+  game = null;
+  pool = [];
+  picks = new Map();
+  gameShown = [];
+  endCelebration();
+  await preparePool(settings.startLevel, mode).catch(() => {});
+  starting = false;
+  game = new Game({ mode, startLevel: settings.startLevel, seed, onEvent, tagger: pieceTag });
   lastHud = '';
   state = 'play';
   paused = false;
@@ -177,15 +306,14 @@ function startGame(mode = game?.mode || 'marathon') {
   $('#hud').hidden = false;
   placeHud();
   updateHud();
-  const rec = photoForGame(game.level);
-  showPhoto(rec);
-  if (rec && settings.captions) caption(fmtDate(rec.date));
+  showLevelPhoto(game.level);
   sound.ensure();
   canvas.focus?.();
 }
 
 function endGame() {
   state = 'over';
+  endCelebration();
   sound.gameOver();
   const mode = game.mode;
   const isBest = game.score > (best[mode] || 0);
@@ -205,6 +333,7 @@ function setPause(on) {
 function toMenu() {
   if (game && game.score > (best[game.mode] || 0)) { best[game.mode] = game.score; save('pictris.best', best); }
   state = 'menu';
+  endCelebration();
   game = null;
   $('#hud').hidden = true; $('#pause').hidden = true; $('#over').hidden = true; $('#menu').hidden = false;
   renderBests();
@@ -222,7 +351,7 @@ function renderBests() {
 const KEYMAP = {
   ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'soft', ArrowUp: 'cw', KeyX: 'cw', KeyZ: 'ccw',
   ControlLeft: 'ccw', ControlRight: 'ccw', KeyA: 'r180', Space: 'hard', KeyC: 'hold', ShiftLeft: 'hold',
-  ShiftRight: 'hold', Escape: 'pause', KeyP: 'pause', F1: 'pause', KeyM: 'mute', KeyR: 'restart', Enter: 'enter',
+  ShiftRight: 'hold', Escape: 'pause', KeyP: 'pause', F1: 'pause', KeyM: 'mute', KeyR: 'restart', Enter: 'enter', KeyV: 'album',
   Numpad4: 'left', Numpad6: 'right', Numpad2: 'soft', Numpad8: 'hard', Numpad1: 'cw', Numpad5: 'cw', Numpad9: 'cw',
   Numpad3: 'ccw', Numpad7: 'ccw', Numpad0: 'hold',
 };
@@ -253,14 +382,25 @@ addEventListener('keydown', (e) => {
   e.preventDefault();
   if (act === 'mute') { sound.muted = !sound.muted; toast(sound.muted ? 'Sound off' : 'Sound on'); return; }
   if (state === 'menu') { if (act === 'enter' || act === 'hard') startGame('marathon'); return; }
-  if (state === 'over') { if (act === 'restart' || act === 'enter') startGame(); else if (act === 'pause') toMenu(); return; }
+  if (state === 'over') {
+    if (act === 'restart' || act === 'enter') startGame();
+    else if (act === 'pause') toMenu();
+    else if (act === 'album') openDialog('albumDlg');
+    return;
+  }
   if (state === 'pause') {
     if (act === 'pause' || act === 'enter') setPause(false);
     else if (act === 'restart') startGame();
+    else if (act === 'album') openDialog('albumDlg');
     return;
   }
   if (act === 'pause') return setPause(true);
-  if (e.repeat) return;
+  if (!game || e.repeat) return;
+  if (celebrate) {
+    // A key press cuts the photo moment short; it isn't passed on to the piece.
+    if (act !== 'album' && celebrate.t > 500 && celebrate.t < CEL.in + CEL.hold) celebrate.t = CEL.in + CEL.hold;
+    return;
+  }
   input.held.add(act);
   switch (act) {
     case 'left': input.press(-1); break;
@@ -325,15 +465,16 @@ function frame(now) {
   const dt = Math.min(100, now - last);
   last = now;
   if (state === 'play' && game) {
-    input.update(dt);
-    game.tick(dt);
+    if (celebrate) stepCelebrate(dt);
+    else { input.update(dt); game.tick(dt); }
     updateHud();
   }
   if (state === 'menu') {
     menuTimer += dt;
     if (menuTimer > 14000) { menuTimer = 0; menuSlide(); }
   }
-  renderer.render({ game: state === 'menu' ? null : game, time: now, dt, settings });
+  renderer.render({ game: state === 'menu' ? null : game, time: now, dt, settings,
+    reveal: revealAmount(), shine: celebrate ? celebrate.t / (CEL.in + CEL.hold) : 0 });
   requestAnimationFrame(frame);
 }
 
@@ -359,6 +500,7 @@ function openDialog(id) {
   const d = document.getElementById(id);
   if (id === 'settingsDlg') fillSettings();
   if (id === 'photosDlg') renderGrid();
+  if (id === 'albumDlg') renderAlbum();
   d.showModal();
 }
 $$('dialog').forEach((d) => d.addEventListener('close', () => {
@@ -382,13 +524,66 @@ form.addEventListener('input', (e) => {
   settings[el.name] = v;
   sound.volume = settings.volume;
   save('pictris.settings', settings);
-  if ((el.name === 'order' || el.name === 'span') && game) showPhoto(photoForGame(game.level));
+  if (el.name === 'captions') setCaption(photos.find((p) => p.id === currentPhotoId));
+  if ((el.name === 'order' || el.name === 'span') && game) {
+    for (const k of [...picks.keys()]) if (k >= game.level) picks.delete(k);
+    showLevelPhoto(game.level);
+    preparePool(game.level);
+  }
 });
 $('#resetSettings').onclick = () => {
   settings = { ...DEFAULTS, gClientId: settings.gClientId, startLevel: settings.startLevel };
   save('pictris.settings', settings);
   fillSettings();
 };
+
+// album of photos shown this game
+let albumAt = 0, albumUrl = null;
+const albumThumbs = [];
+function renderAlbum() {
+  albumThumbs.splice(0).forEach(URL.revokeObjectURL);
+  const strip = $('#albumStrip');
+  strip.textContent = '';
+  const has = gameShown.length > 0;
+  $('#albumEmpty').hidden = has;
+  $('#albumFig').hidden = !has;
+  $('#albumCap').hidden = !has;
+  if (!has) return;
+  gameShown.forEach((g, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.title = `Level ${g.level} · ${fmtDate(g.rec.date)}`;
+    const img = new Image();
+    const url = URL.createObjectURL(g.rec.thumb);
+    albumThumbs.push(url);
+    img.src = url; img.alt = b.title;
+    b.append(img);
+    b.onclick = () => albumShow(i);
+    strip.append(b);
+  });
+  albumShow(gameShown.length - 1);
+}
+function albumShow(i) {
+  albumAt = (i + gameShown.length) % gameShown.length;
+  const g = gameShown[albumAt];
+  if (albumUrl) URL.revokeObjectURL(albumUrl);
+  albumUrl = URL.createObjectURL(g.rec.blob);
+  $('#albumImg').src = albumUrl;
+  $('#albumCap').textContent = `${fmtDay(g.rec.date)} · level ${g.level}`;
+  [...$('#albumStrip').children].forEach((b, k) => {
+    b.setAttribute('aria-current', k === albumAt);
+    if (k === albumAt) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  });
+  const many = gameShown.length > 1;
+  $('#albumPrev').style.visibility = $('#albumNext').style.visibility = many ? '' : 'hidden';
+}
+$('#albumPrev').onclick = () => albumShow(albumAt - 1);
+$('#albumNext').onclick = () => albumShow(albumAt + 1);
+$('#albumDlg').addEventListener('keydown', (e) => {
+  if (!gameShown.length) return;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); albumShow(albumAt - 1); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); albumShow(albumAt + 1); }
+});
 
 // photo library UI
 const status = (t) => ($('#importStatus').textContent = t);
@@ -455,6 +650,10 @@ $('#clearAll').onclick = async () => {
   if (!confirm(`Remove all ${photos.length} photos from this browser?`)) return;
   await P.clearPhotos();
   bitmapCache.clear();
+  layerPhoto.fill(null);
+  pool = [];
+  seen = {};
+  save('pictris.seen', seen);
   await refreshPhotos(); renderGrid();
   showPhoto(null);
 };
