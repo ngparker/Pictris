@@ -10,7 +10,7 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 
 // ---------------- settings ----------------
 const DEFAULTS = {
-  blockStyle: 'reveal', order: 'chrono', span: 15, background: true, dim: 0.45, blur: 1.5, tint: 0.15,
+  blockStyle: 'color', order: 'chrono', span: 15, background: true, dim: 0.5, blur: 3, tint: 0.15, v: 2,
   boardOpacity: 0.72, captions: true, ghost: true, previews: 5, das: 167, arr: 33, clearText: true,
   reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, volume: 0.5, moveSounds: false,
   startLevel: 1, gClientId: '', celebrate: true, avoidRepeats: true, albumUrl: '', relay: '',
@@ -21,6 +21,8 @@ let settings = load('pictris.settings', DEFAULTS);
 let best = load('pictris.best', { marathon: 0, zen: 0 });
 let seen = load('pictris.seen', {}); // photo id -> last time it was the level photo
 if (settings.blockStyle === 'photo') settings.blockStyle = 'reveal';
+// v2: solid blocks, photo comes into focus as the level progresses.
+if (!(load('pictris.settings', {}).v >= 2)) Object.assign(settings, { blockStyle: 'color', blur: DEFAULTS.blur, dim: DEFAULTS.dim, v: 2 });
 
 // ---------------- core objects ----------------
 const canvas = $('#gl');
@@ -518,6 +520,7 @@ canvas.addEventListener('pointercancel', () => { touch.id = null; if (game) game
 
 // ---------------- loop ----------------
 let last = performance.now();
+let focus = 0; // smoothed progress through the current level, 0..1
 function frame(now) {
   const dt = Math.min(100, now - last);
   last = now;
@@ -526,12 +529,16 @@ function frame(now) {
     else { input.update(dt); game.tick(dt); }
     updateHud();
   }
+  if (game) {
+    const target = game.over ? focus : ((game.lines - (game.level - game.startLevel) * LINES_PER_LEVEL) / LINES_PER_LEVEL);
+    focus += (target - focus) * Math.min(1, dt / (target < focus ? 1200 : 500));
+  } else focus = 0;
   if (state === 'menu') {
     menuTimer += dt;
     if (menuTimer > 14000) { menuTimer = 0; menuSlide(); }
   }
   renderer.render({ game: state === 'menu' ? null : game, time: now, dt, settings,
-    reveal: revealAmount(), shine: celebrate ? celebrate.t / (CEL.in + CEL.hold) : 0 });
+    focus, reveal: revealAmount(), shine: celebrate ? celebrate.t / (CEL.in + CEL.hold) : 0 });
   requestAnimationFrame(frame);
 }
 
@@ -589,7 +596,7 @@ form.addEventListener('input', (e) => {
   }
 });
 $('#resetSettings').onclick = () => {
-  settings = { ...DEFAULTS, gClientId: settings.gClientId, startLevel: settings.startLevel };
+  settings = { ...DEFAULTS, gClientId: settings.gClientId, startLevel: settings.startLevel, albumUrl: settings.albumUrl, relay: settings.relay };
   save('pictris.settings', settings);
   fillSettings();
 };

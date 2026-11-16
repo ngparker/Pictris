@@ -134,15 +134,15 @@
     <div class="settings" id="settingsForm">
       <h3>Photos</h3>
       <label>Blocks
-        <select name="blockStyle"><option value="reveal">Lenses: landed blocks bring the photo into focus</option><option value="pieces">A photo on every piece</option><option value="color">Plain colors</option></select></label>
+        <select name="blockStyle"><option value="color">Solid colors (they hide the photo)</option><option value="reveal">Lenses: landed blocks show the photo sharp</option><option value="pieces">A photo on every piece</option></select></label>
       <label>Photo order
         <select name="order"><option value="chrono">Oldest → newest as you level</option><option value="shuffle">Shuffle</option></select></label>
       <label>Levels to reach today's photos <input name="span" type="number" min="1" max="50"></label>
       <label class="check"><input name="background" type="checkbox"> Photo in background</label>
-      <label>Background dimming <input name="dim" type="range" min="0" max="0.9" step="0.05"></label>
-      <label>Background softness <input name="blur" type="range" min="0" max="4" step="0.25"></label>
+      <label>Dimming at level start <input name="dim" type="range" min="0" max="0.9" step="0.05"></label>
+      <label>Blur at level start <input name="blur" type="range" min="0" max="4" step="0.25"></label>
       <label>Piece color tint <input name="tint" type="range" min="0" max="1" step="0.05"></label>
-      <label>Board darkness <input name="boardOpacity" type="range" min="0.3" max="1" step="0.05"></label>
+      <label>Board darkness at level start <input name="boardOpacity" type="range" min="0.3" max="1" step="0.05"></label>
       <label class="check"><input name="celebrate" type="checkbox"> Pause briefly on level up to show the whole photo</label>
       <label class="check"><input name="avoidRepeats" type="checkbox"> Prefer photos not shown in earlier games</label>
       <label class="check"><input name="captions" type="checkbox"> Show photo date</label>

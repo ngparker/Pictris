@@ -26,7 +26,7 @@ vec2 cover(vec2 uv, vec2 s){ return (uv-0.5)*s+0.5; }
 vec3 soft(sampler2D t, vec2 uv){
   vec3 c = vec3(0.);
   for(int i=-2;i<=2;i++) for(int j=-2;j<=2;j++){
-    c += textureLod(t, uv + vec2(float(i),float(j))*0.006*uBlur, 2.0 + uBlur).rgb;
+    c += textureLod(t, uv + vec2(float(i),float(j))*0.006*uBlur, min(uBlur*2.5, 2.0 + uBlur)).rgb;
   }
   return c/25.;
 }
@@ -379,8 +379,10 @@ export class Renderer {
     gl.uniform2fv(U.uC0, this.cover(t0)); gl.uniform2fv(U.uC1, this.cover(t1));
     gl.uniform1f(U.uH0, s.background ? has0 : 0); gl.uniform1f(U.uH1, s.background ? has1 : 0);
     gl.uniform1f(U.uMix, this.fading ? this.mix : 0);
-    gl.uniform1f(U.uDim, game ? s.dim : s.dim * 0.6);
-    gl.uniform1f(U.uBlur, game ? s.blur : Math.min(s.blur, 0.25));
+    // focus: 0 at the start of a level, 1 when it is nearly complete. The photo sharpens and brightens with it.
+    const focus = game ? Math.min(1, Math.max(0, v.focus || 0)) : 0;
+    gl.uniform1f(U.uDim, game ? s.dim * (1 - 0.8 * focus) : s.dim * 0.6);
+    gl.uniform1f(U.uBlur, game ? s.blur * (1 - focus) : Math.min(s.blur, 0.25));
     gl.uniform1f(U.uTime, s.reduceMotion ? 0 : v.time / 1000);
     const reveal = v.reveal || 0;
     this.fade = 1 - reveal;
@@ -395,7 +397,7 @@ export class Renderer {
     const { cell, bx, by, bw, bh } = L;
     if (!game) return this.flush(has0, has1, t0, t1);
     const panel = [0.02, 0.025, 0.04];
-    this.quad(bx - 3, by - 3, bw + 6, bh + 6, panel, s.boardOpacity, 3, 0, 0, Math.max(4, cell * 0.2));
+    this.quad(bx - 3, by - 3, bw + 6, bh + 6, panel, s.boardOpacity * (1 - 0.7 * focus), 3, 0, 0, Math.max(4, cell * 0.2));
     for (const p of [L.hold, L.next]) this.quad(p.x, p.y, p.w, p.h, panel, s.boardOpacity * 0.85, 3, 0, 0, cell * 0.25);
     // faint grid
     const gc = [1, 1, 1];
