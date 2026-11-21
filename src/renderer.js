@@ -1,5 +1,8 @@
-// WebGL2 renderer: blurred photo backdrop + instanced-style batched rounded blocks.
-// Locked blocks in "photo" style act as windows onto the sharp photo behind the board.
+// WebGL2 renderer: photo backdrop + batched rounded quads (blocks, panels, mosaic tiles).
+// Three photo experiences, all driven by `focus` = progress through the current level (0..1):
+//   focus  - the photo starts blurred and dim and sharpens as you clear lines
+//   mosaic - the photo assembles from tiles, centre first, as you clear lines
+//   living - a sharp photo with gentle parallax, lit from dawn to golden hour to full light
 
 import { COLS, VISIBLE, HIDDEN, CELLS, TYPES, CLEAR_DELAY, LOCK_DELAY } from './game.js';
 
@@ -19,7 +22,35 @@ uniform sampler2D uT0, uT1;
 uniform vec2 uC0, uC1;
 uniform float uH0, uH1, uMix, uDim, uBlur, uTime, uReveal, uShine;
 uniform vec2 uF0, uF1;
+uniform int uMode;          // 0 focus, 1 mosaic (ghost backdrop), 2 living
+uniform float uFocus, uSweep, uZoom, uAspect;
+uniform vec2 uPar;
 vec2 cover(vec2 uv, vec2 s){ return (uv-0.5)*s+0.5; }
+
+// Living: a smooth pseudo-depth (centre and lower frame read as nearer) for gentle parallax.
+float depth(vec2 uv){
+  float d = 1. - smoothstep(0.05, 0.8, length((uv - vec2(0.5, 0.58)) * vec2(1.0, 0.85)));
+  return clamp(d * 0.8 + uv.y * 0.35, 0., 1.);
+}
+vec3 sharpAt(vec2 uv){
+  vec3 a = uH0>0.5 ? texture(uT0, cover(uv,uC0)).rgb : vec3(0.07,0.08,0.11);
+  vec3 b = uH1>0.5 ? texture(uT1, cover(uv,uC1)).rgb : vec3(0.07,0.08,0.11);
+  return mix(a,b,uMix);
+}
+// Dawn (cool, dim, muted) -> golden hour (warm, glowing) -> full daylight, by level progress p.
+vec3 grade(vec3 c, vec2 uv, float p){
+  float dawn = 1. - smoothstep(0., 0.45, p);
+  float gold = smoothstep(0.2, 0.5, p) * (1. - smoothstep(0.7, 1.0, p));
+  float expo = mix(0.5, 1.0, smoothstep(0., 0.85, p));
+  float l = dot(c, vec3(0.299, 0.587, 0.114));
+  c = mix(vec3(l), c, mix(1.0, 0.55, dawn) + 0.12*gold);
+  c *= mix(mix(vec3(1.), vec3(0.80, 0.89, 1.10), dawn), vec3(1.12, 1.0, 0.82), gold) * expo;
+  vec2 sun = mix(vec2(0.1, 0.9), vec2(0.85, 0.1), smoothstep(0., 1., p));
+  vec2 dv = (uv - sun) * vec2(uAspect, 1.);
+  float g = exp(-dot(dv, dv) * 2.2);
+  c += vec3(1.0, 0.74, 0.45) * g * (0.05 + 0.20*gold);
+  return c;
+}
 vec3 soft(sampler2D t, vec2 uv){
   vec3 c = vec3(0.);
   for(int i=-2;i<=2;i++) for(int j=-2;j<=2;j++){
@@ -37,37 +68,48 @@ void main(){
   vec3 b = uH1>0.5 ? soft(uT1, cover(zuv,uC1)) : base;
   vec3 c = mix(a,b,uMix);
   c *= 1.-uDim;
+  vec2 luv = (uv-0.5)/uZoom + 0.5 + drift*0.6;
+  luv += uPar * (depth(luv) - 0.45) * 0.028;
+  if (uMode == 2) {
+    c = grade(sharpAt(luv), uv, uFocus) * (1. - uDim*0.35);
+    float band = exp(-pow((uv.x*0.85 + uv.y*0.45 - (uSweep*1.9 - 0.45))*6., 2.));
+    c += vec3(1.0, 0.88, 0.70) * band * 0.13 * step(0., uSweep) * (1. - uSweep*0.5);
+  }
   float v = smoothstep(1.15, 0.35, length(vUv-0.5));
   c *= mix(0.55, 1.0, v);
   if (uReveal > 0.) {
     // Level-up moment: pull focus and ease from cover-fit out to the whole photo.
-    vec2 p0 = cover(uv, mix(uC0, uF0, uReveal)), p1 = cover(uv, mix(uC1, uF1, uReveal));
+    vec2 ruv = uMode == 2 ? mix(luv, uv, uReveal) : uv;
+    vec2 p0 = cover(ruv, mix(uC0, uF0, uReveal)), p1 = cover(ruv, mix(uC1, uF1, uReveal));
     vec2 e0 = smoothstep(vec2(0.), vec2(0.004), p0) * smoothstep(vec2(0.), vec2(0.004), 1.-p0);
     vec2 e1 = smoothstep(vec2(0.), vec2(0.004), p1) * smoothstep(vec2(0.), vec2(0.004), 1.-p1);
     float m0 = e0.x*e0.y*uH0, m1 = e1.x*e1.y*uH1;
     vec3 sharp = mix(texture(uT0, p0).rgb, texture(uT1, p1).rgb, uMix);
+    if (uMode == 2) sharp = mix(grade(sharp, uv, 1.), sharp, uReveal);
     float m = mix(m0, m1, uMix);
     float band = exp(-pow((uv.x + uv.y*0.35 - (uShine*1.9 - 0.3))*5., 2.));
     sharp += band*0.10;
+    if (uMode == 2) sharp += vec3(1.0, 0.8, 0.55) * 0.10 * sin(3.14159*uReveal);
     c = mix(c*(1.-0.45*uReveal), sharp, m*uReveal);
   }
   o = vec4(c,1.);
 }`;
 
 const Q_VS = `#version 300 es
-in vec2 aPos; in vec2 aLocal; in vec2 aSize; in vec4 aColor; in vec4 aParams;
+in vec2 aPos; in vec2 aLocal; in vec2 aSize; in vec4 aColor; in vec4 aParams; in vec4 aHome;
 uniform vec2 uRes;
-out vec2 vLocal; out vec2 vSize; out vec4 vColor; out vec4 vParams;
+out vec2 vLocal; out vec2 vSize; out vec4 vColor; out vec4 vParams; out vec4 vHome;
 void main(){
-  vLocal=aLocal; vSize=aSize; vColor=aColor; vParams=aParams;
+  vLocal=aLocal; vSize=aSize; vColor=aColor; vParams=aParams; vHome=aHome;
   vec2 c = aPos/uRes*2.-1.;
   gl_Position = vec4(c.x, -c.y, 0., 1.);
 }`;
 
-// params: x=mode (0 solid,1 reveal background photo,2 ghost,3 panel), y=flash, z=tint, w=radius(px)
+// params: x=mode (0 solid,1 reveal background photo,2 ghost,3 panel,4 mosaic tile), y=flash, z=tint/bevel, w=radius(px)
+// home: for mosaic tiles, the screen rect (px) of the photo patch the tile carries, wherever it is drawn.
 const Q_FS = `#version 300 es
 precision highp float;
-in vec2 vLocal; in vec2 vSize; in vec4 vColor; in vec4 vParams;
+in vec2 vLocal; in vec2 vSize; in vec4 vColor; in vec4 vParams; in vec4 vHome;
 out vec4 o;
 uniform sampler2D uT0, uT1;
 uniform vec2 uC0, uC1, uRes;
@@ -84,6 +126,17 @@ void main(){
   vec3 col = vColor.rgb;
   float alpha = vColor.a;
   if (mode == 3) { o = vec4(col*alpha*aa, alpha*aa); return; }
+  if (mode == 4) {
+    vec2 suv = (vHome.xy + vLocal*vHome.zw) / uRes;
+    vec3 a = uH0>0.5 ? texture(uT0, cover(suv,uC0)).rgb : vec3(0.1);
+    vec3 b = uH1>0.5 ? texture(uT1, cover(suv,uC1)).rgb : vec3(0.1);
+    vec3 ph = mix(a,b,uMix);
+    float edge = min(min(vLocal.x,1.-vLocal.x)*vSize.x, min(vLocal.y,1.-vLocal.y)*vSize.y);
+    float rim = 1.-smoothstep(0., max(1.5, vSize.x*0.10), edge);
+    ph *= 1. + rim*((0.5-vLocal.y) + (0.5-vLocal.x)*0.5)*0.5*vParams.z;
+    ph = mix(ph, vec3(1.), vParams.y);
+    o = vec4(ph*alpha*aa, alpha*aa); return;
+  }
   if (mode == 2) {
     float bw = max(1.5, vSize.x*0.07);
     float inner = clamp(0.5-(d+bw), 0., 1.);
@@ -127,7 +180,10 @@ function compile(gl, vs, fs) {
   return { p, u };
 }
 
-const FLOATS = 14; // per vertex
+const FLOATS = 18; // per vertex
+const MAX_QUADS = 3200;
+const NO_HOME = [0, 0, 0, 0];
+const easeOut = (t) => 1 - Math.pow(1 - t, 3);
 
 export class Renderer {
   constructor(canvas) {
@@ -151,10 +207,10 @@ export class Renderer {
     gl.bindVertexArray(this.qVao);
     this.qBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.qBuf);
-    this.data = new Float32Array(FLOATS * 6 * 1200);
+    this.data = new Float32Array(FLOATS * 6 * MAX_QUADS);
     gl.bufferData(gl.ARRAY_BUFFER, this.data.byteLength, gl.DYNAMIC_DRAW);
     let off = 0;
-    for (const [name, size] of [['aPos', 2], ['aLocal', 2], ['aSize', 2], ['aColor', 4], ['aParams', 4]]) {
+    for (const [name, size] of [['aPos', 2], ['aLocal', 2], ['aSize', 2], ['aColor', 4], ['aParams', 4], ['aHome', 4]]) {
       const l = gl.getAttribLocation(this.q.p, name);
       gl.enableVertexAttribArray(l);
       gl.vertexAttribPointer(l, size, gl.FLOAT, false, FLOATS * 4, off * 4);
@@ -170,6 +226,95 @@ export class Renderer {
     this.n = 0;
     this.fade = 1;
     this.layout = null;
+    this.mosaic = null;
+    this.par = [0, 0];
+    this.sweep = -1;
+  }
+
+  /** Living: a light sweep across the photo (called on line clears). */
+  pulse() { this.sweep = 0; }
+
+  // ---------- mosaic ----------
+  /** Tile grid aligned to the board cells, covering the screen; rank order is centre-first with jitter. */
+  buildMosaic(L) {
+    const c = L.cell;
+    const x0 = L.bx - Math.ceil(L.bx / c) * c, y0 = L.by - Math.ceil(L.by / c) * c;
+    const cols = Math.ceil((L.W - x0) / c), rows = Math.ceil((L.H - y0) / c);
+    const n = cols * rows;
+    const prio = new Float32Array(n);
+    const cx = L.W / 2, cy = L.H * 0.4, R = Math.max(L.W, L.H) / 2;
+    for (let r = 0; r < rows; r++) for (let q = 0; q < cols; q++) {
+      const i = r * cols + q;
+      const dx = (x0 + (q + 0.5) * c - cx) / R, dy = (y0 + (r + 0.5) * c - cy) / R;
+      const dist = Math.hypot(dx, dy * 1.15);
+      // Centre first, with a ragged frontier, and a few stray tiles that land early anywhere.
+      prio[i] = dist < 0.85 && Math.random() < 0.025 ? Math.random() * 0.9 : dist + (Math.random() - 0.5) * 0.4;
+    }
+    const order = Int32Array.from({ length: n }, (_, i) => i).sort((a, b) => prio[a] - prio[b]);
+    const prev = this.mosaic;
+    this.mosaic = {
+      x0, y0, cols, rows, n, cell: c, order,
+      arrive: new Float64Array(n).fill(-1),
+      from: new Float32Array(n * 4), // start x,y and curve control x,y
+      home: 0, W: L.W, H: L.H,
+    };
+    // A rebuild mid-level (resize) keeps the same share of tiles in place, already landed.
+    if (prev) this.mosaicAdvance(Math.round((prev.home / prev.n) * n), -1e9);
+  }
+
+  resetMosaic() { if (this.mosaic) { this.mosaic.home = 0; this.mosaic.arrive.fill(-1); } }
+
+  mosaicAdvance(target, now) {
+    const m = this.mosaic;
+    target = Math.min(m.n, target);
+    const batch = target - m.home;
+    for (let k = 0; k < batch; k++) {
+      const i = m.order[m.home + k];
+      const q = i % m.cols, r = (i / m.cols) | 0;
+      const hx = m.x0 + q * m.cell, hy = m.y0 + r * m.cell;
+      // Fly in from beyond the edge, roughly away from the centre, on a gently curving path.
+      let dx = hx - m.W / 2, dy = hy - m.H * 0.4;
+      const len = Math.hypot(dx, dy) || 1;
+      dx /= len; dy /= len;
+      const a = (Math.random() - 0.5) * 1.2;
+      const ux = dx * Math.cos(a) - dy * Math.sin(a), uy = dx * Math.sin(a) + dy * Math.cos(a);
+      const dist = Math.max(m.W, m.H) * (0.35 + Math.random() * 0.3);
+      const sx = hx + ux * dist, sy = hy + uy * dist;
+      const bend = (Math.random() - 0.5) * dist * 0.6;
+      m.from.set([sx, sy, (sx + hx) / 2 - uy * bend, (sy + hy) / 2 + ux * bend], i * 4);
+      m.arrive[i] = now + Math.min(k * 9, 500) + Math.random() * 160;
+    }
+    m.home = Math.max(m.home, target);
+  }
+
+  drawMosaic(now, progress, seal, reduceMotion) {
+    const L = this.layout;
+    if (!this.mosaic || this.mosaic.W !== L.W || this.mosaic.H !== L.H || this.mosaic.cell !== L.cell) this.buildMosaic(L);
+    const m = this.mosaic;
+    this.mosaicAdvance(Math.floor(progress * m.n + 1e-6), now);
+    const c = m.cell;
+    const gap = Math.max(1, c * 0.045) * (1 - seal);
+    const rad = c * 0.1 * (1 - seal);
+    const FLY = reduceMotion ? 1 : 1050;
+    for (let k = 0; k < m.home; k++) {
+      const i = m.order[k];
+      const t = (now - m.arrive[i]) / FLY;
+      if (t < 0) continue;
+      const q = i % m.cols, r = (i / m.cols) | 0;
+      const hx = m.x0 + q * c + gap / 2, hy = m.y0 + r * c + gap / 2, hs = c - gap;
+      const home = [hx, hy, hs, hs];
+      if (t >= 1 || reduceMotion) {
+        this.quad(hx, hy, hs, hs, [1, 1, 1], 1, 4, 0, 1 - seal, rad, home);
+        continue;
+      }
+      const e = easeOut(t), u = 1 - e;
+      const f = m.from;
+      const px = u * u * f[i * 4] + 2 * u * e * f[i * 4 + 2] + e * e * hx;
+      const py = u * u * f[i * 4 + 1] + 2 * u * e * f[i * 4 + 3] + e * e * hy;
+      const sc = 0.55 + 0.45 * e;
+      const sz = hs * sc;
+      this.quad(px + (hs - sz) / 2, py + (hs - sz) / 2, sz, sz, [1, 1, 1], Math.min(1, t * 3), 4, 0.18 * u, 1, rad * sc, home);
+    }
   }
 
   makeTex() {
@@ -198,6 +343,7 @@ export class Renderer {
     } else {
       this.slots[next] = null;
     }
+    this.resetMosaic();
     this.fading = true;
     this.mix = instant ? 1 : 0;
     if (instant) this.finishFade();
@@ -264,8 +410,8 @@ export class Renderer {
     return I > A ? [A / I, 1] : [1, I / A];
   }
 
-  quad(x, y, w, h, color, alpha, mode, flash = 0, tint = 0, radius = 0) {
-    if (this.n >= 1200) return;
+  quad(x, y, w, h, color, alpha, mode, flash = 0, tint = 0, radius = 0, home = NO_HOME) {
+    if (this.n >= MAX_QUADS) return;
     alpha *= this.fade;
     const d = this.data;
     let o = this.n * 6 * FLOATS;
@@ -276,6 +422,7 @@ export class Renderer {
       d[o++] = w; d[o++] = h;
       d[o++] = color[0]; d[o++] = color[1]; d[o++] = color[2]; d[o++] = alpha;
       d[o++] = mode; d[o++] = flash; d[o++] = tint; d[o++] = radius;
+      d[o++] = home[0]; d[o++] = home[1]; d[o++] = home[2]; d[o++] = home[3];
     }
     this.n++;
   }
@@ -321,10 +468,31 @@ export class Renderer {
     gl.uniform2fv(U.uC0, this.cover(t0)); gl.uniform2fv(U.uC1, this.cover(t1));
     gl.uniform1f(U.uH0, s.background ? has0 : 0); gl.uniform1f(U.uH1, s.background ? has1 : 0);
     gl.uniform1f(U.uMix, this.fading ? this.mix : 0);
-    // focus: 0 at the start of a level, 1 when it is nearly complete. The photo sharpens and brightens with it.
+    // focus: 0 at the start of a level, 1 when it is nearly complete.
     const focus = game ? Math.min(1, Math.max(0, v.focus || 0)) : 0;
-    gl.uniform1f(U.uDim, game ? s.dim * (1 - 0.8 * focus) : s.dim * 0.6);
-    gl.uniform1f(U.uBlur, game ? s.blur * (1 - focus) : Math.min(s.blur, 0.25));
+    const exp = game ? s.experience : 'menu';
+    let dim, blur;
+    if (exp === 'mosaic') { dim = 0.8; blur = 3; }
+    else if (exp === 'living') { dim = s.dim * 0.5; blur = 0; }
+    else if (exp === 'focus') { dim = s.dim * (1 - 0.8 * focus); blur = s.blur * (1 - focus); }
+    else { dim = s.dim * 0.6; blur = Math.min(s.blur, 0.25); }
+    gl.uniform1f(U.uDim, dim);
+    gl.uniform1f(U.uBlur, blur);
+    gl.uniform1i(U.uMode, exp === 'mosaic' ? 1 : exp === 'living' ? 2 : 0);
+    gl.uniform1f(U.uFocus, focus);
+    gl.uniform1f(U.uAspect, L.W / L.H);
+    // Living: the camera eases in as the level progresses, and sways a little with the falling piece.
+    let tx = 0, ty = 0;
+    if (exp === 'living' && !s.reduceMotion && game.active) {
+      tx = ((game.active.x + 1.5) / COLS - 0.5) * 2;
+      ty = Math.sin(v.time / 5200) * 0.35;
+    }
+    const k = Math.min(1, v.dt / 900);
+    this.par[0] += (tx - this.par[0]) * k; this.par[1] += (ty - this.par[1]) * k;
+    gl.uniform2fv(U.uPar, this.par);
+    gl.uniform1f(U.uZoom, 1.06 - 0.03 * focus);
+    if (this.sweep >= 0) { this.sweep += v.dt / 1300; if (this.sweep > 1) this.sweep = -1; }
+    gl.uniform1f(U.uSweep, exp === 'living' && !s.reduceMotion ? this.sweep : -1);
     gl.uniform1f(U.uTime, s.reduceMotion ? 0 : v.time / 1000);
     const reveal = v.reveal || 0;
     this.fade = 1 - reveal;
@@ -338,8 +506,10 @@ export class Renderer {
     this.n = 0;
     const { cell, bx, by, bw, bh } = L;
     if (!game) return this.flush(has0, has1, t0, t1);
+    if (exp === 'mosaic') this.drawMosaic(v.time, focus, v.seal || 0, s.reduceMotion);
     const panel = [0.02, 0.025, 0.04];
-    this.quad(bx - 3, by - 3, bw + 6, bh + 6, panel, s.boardOpacity * (1 - 0.7 * focus), 3, 0, 0, Math.max(4, cell * 0.2));
+    const boardAlpha = s.boardOpacity * (exp === 'mosaic' ? 0.6 * (1 - 0.45 * focus) : exp === 'living' ? 1 - 0.25 * focus : 1 - 0.7 * focus);
+    this.quad(bx - 3, by - 3, bw + 6, bh + 6, panel, boardAlpha, 3, 0, 0, Math.max(4, cell * 0.2));
     for (const p of [L.hold, L.next]) this.quad(p.x, p.y, p.w, p.h, panel, s.boardOpacity * 0.85, 3, 0, 0, cell * 0.25);
     // faint grid
     const gc = [1, 1, 1];

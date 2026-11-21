@@ -35,6 +35,11 @@
         <button class="primary" data-start="marathon">Marathon<small>Speeds up every 10 lines</small></button>
         <button class="primary" data-start="zen">Zen<small>Steady pace, no game over</small></button>
       </div>
+      <div class="exp" role="radiogroup" aria-label="Photo style">
+        <button type="button" role="radio" data-exp="focus">Focus<small>Blurred photo sharpens as you clear lines</small></button>
+        <button type="button" role="radio" data-exp="mosaic">Mosaic<small>Photo assembles tile by tile</small></button>
+        <button type="button" role="radio" data-exp="living">Living<small>Photo comes alive, dawn to daylight</small></button>
+      </div>
       <label class="inline">Start level
         <select id="startLevel"></select>
       </label>
@@ -133,14 +138,16 @@
     <form method="dialog" class="dlg-head"><h2>Settings</h2><button aria-label="Close">✕</button></form>
     <div class="settings" id="settingsForm">
       <h3>Photos</h3>
+      <label>Photo style
+        <select name="experience"><option value="focus">Focus</option><option value="mosaic">Mosaic</option><option value="living">Living</option></select></label>
       <label>Blocks
         <select name="blockStyle"><option value="color">Solid colors (they hide the photo)</option><option value="reveal">Lenses: landed blocks show the photo sharp</option></select></label>
       <label>Photo order
         <select name="order"><option value="chrono">Oldest → newest as you level</option><option value="shuffle">Shuffle</option></select></label>
       <label>Levels to reach today's photos <input name="span" type="number" min="1" max="50"></label>
       <label class="check"><input name="background" type="checkbox"> Photo in background</label>
-      <label>Dimming at level start <input name="dim" type="range" min="0" max="0.9" step="0.05"></label>
-      <label>Blur at level start <input name="blur" type="range" min="0" max="4" step="0.25"></label>
+      <label>Focus: dimming at level start <input name="dim" type="range" min="0" max="0.9" step="0.05"></label>
+      <label>Focus: blur at level start <input name="blur" type="range" min="0" max="4" step="0.25"></label>
       <label>Piece color tint <input name="tint" type="range" min="0" max="1" step="0.05"></label>
       <label>Board darkness at level start <input name="boardOpacity" type="range" min="0.3" max="1" step="0.05"></label>
       <label class="check"><input name="celebrate" type="checkbox"> Pause briefly on level up to show the whole photo</label>

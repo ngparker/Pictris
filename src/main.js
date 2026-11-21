@@ -13,7 +13,7 @@ const DEFAULTS = {
   blockStyle: 'color', order: 'chrono', span: 15, background: true, dim: 0.5, blur: 3, tint: 0.15, v: 2,
   boardOpacity: 0.72, captions: true, ghost: true, previews: 5, das: 167, arr: 33,
   reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, volume: 0.5, moveSounds: false,
-  startLevel: 1, gClientId: '', celebrate: true, avoidRepeats: true, albumUrl: '', relay: '',
+  startLevel: 1, gClientId: '', celebrate: true, avoidRepeats: true, experience: 'focus', albumUrl: '', relay: '',
 };
 const load = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return { ...d }; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
@@ -86,6 +86,8 @@ function photoForGame(level, mode = game?.mode) {
 
 /** Make `level`'s photo the current one, record it, and warm up the next. */
 function showLevelPhoto(level, mode = game?.mode) {
+  focus = 0;
+  renderer.resetMosaic(); // a new level always assembles from scratch, even when the photo repeats
   const rec = photoForGame(level, mode);
   showPhoto(rec);
   setCaption(rec);
@@ -222,6 +224,8 @@ function setCaption(rec, bright = false) {
 
 // Level-up moment: the board fades, the finished photo comes into full focus, then the next one drifts in.
 const CEL = { in: 450, hold: 1500, out: 700 };
+const SEAL = 1100; // mosaic only: last tiles land, then gaps close, before the reveal starts
+const ease01 = (x) => Math.min(1, Math.max(0, x));
 let celebrate = null; // { t, level, switched }
 const ease = (x) => x * x * (3 - 2 * x);
 function stepCelebrate(dt) {
@@ -237,6 +241,7 @@ function stepCelebrate(dt) {
 function revealAmount() {
   if (!celebrate) return 0;
   const t = celebrate.t;
+  if (t < 0) return 0;
   if (t < CEL.in) return ease(t / CEL.in);
   if (t < CEL.in + CEL.hold) return 1;
   return 1 - ease(Math.min(1, (t - CEL.in - CEL.hold) / CEL.out));
@@ -255,13 +260,13 @@ function onEvent(type, d) {
     case 'rotate': if (settings.moveSounds) sound.rotate(); break;
     case 'hold': sound.hold(); break;
     case 'clear': {
-      if (d.lines) sound.clear(d.lines, d.combo);
+      if (d.lines) { sound.clear(d.lines, d.combo); renderer.pulse(); }
       break;
     }
     case 'levelup': {
       sound.levelUp();
       if (settings.celebrate && currentPhotoId !== null) {
-        celebrate = { t: 0, level: d.level, switched: false };
+        celebrate = { t: settings.experience === 'mosaic' ? -SEAL : 0, level: d.level, switched: false };
         document.body.classList.add('celebrate');
         setCaption(photos.find((p) => p.id === currentPhotoId), true);
       } else {
@@ -275,6 +280,7 @@ function onEvent(type, d) {
 }
 
 let starting = false;
+let focus = 0; // smoothed progress through the current level, 0..1
 async function startGame(mode = game?.mode || 'marathon') {
   if (starting) return;
   starting = true;
@@ -385,6 +391,7 @@ addEventListener('keydown', (e) => {
   if (celebrate) {
     // A key press cuts the photo moment short; it isn't passed on to the piece.
     if (act !== 'album' && celebrate.t > 500 && celebrate.t < CEL.in + CEL.hold) celebrate.t = CEL.in + CEL.hold;
+    else if (act !== 'album' && celebrate.t < 0 && celebrate.t > -SEAL + 400) celebrate.t = 0;
     return;
   }
   input.held.add(act);
@@ -447,7 +454,6 @@ canvas.addEventListener('pointercancel', () => { touch.id = null; if (game) game
 
 // ---------------- loop ----------------
 let last = performance.now();
-let focus = 0; // smoothed progress through the current level, 0..1
 function frame(now) {
   const dt = Math.min(100, now - last);
   last = now;
@@ -457,7 +463,10 @@ function frame(now) {
     updateHud();
   }
   if (game) {
-    const target = game.over ? focus : ((game.lines - (game.level - game.startLevel) * LINES_PER_LEVEL) / LINES_PER_LEVEL);
+    // During the level-up moment the finished photo stays complete; the next level starts from 0.
+    let target = (game.lines - (game.level - game.startLevel) * LINES_PER_LEVEL) / LINES_PER_LEVEL;
+    if (game.over) target = focus;
+    else if (celebrate && !celebrate.switched) target = 1;
     focus += (target - focus) * Math.min(1, dt / (target < focus ? 1200 : 500));
   } else focus = 0;
   if (state === 'menu') {
@@ -465,7 +474,7 @@ function frame(now) {
     if (menuTimer > 14000) { menuTimer = 0; menuSlide(); }
   }
   renderer.render({ game: state === 'menu' ? null : game, time: now, dt, settings,
-    focus, reveal: revealAmount(), shine: celebrate ? celebrate.t / (CEL.in + CEL.hold) : 0 });
+    focus, reveal: revealAmount(), seal: celebrate && !celebrate.switched ? ease01((celebrate.t + 350) / 350) : 0, shine: celebrate ? celebrate.t / (CEL.in + CEL.hold) : 0 });
   requestAnimationFrame(frame);
 }
 
@@ -478,6 +487,13 @@ sel.value = settings.startLevel;
 sel.onchange = () => { settings.startLevel = +sel.value; save('pictris.settings', settings); };
 
 $$('[data-start]').forEach((b) => (b.onclick = () => startGame(b.dataset.start)));
+function renderExp() {
+  $$('[data-exp]').forEach((b) => b.setAttribute('aria-checked', b.dataset.exp === settings.experience));
+}
+$$('[data-exp]').forEach((b) => (b.onclick = () => {
+  settings.experience = b.dataset.exp; save('pictris.settings', settings); renderExp();
+}));
+renderExp();
 $$('[data-open]').forEach((b) => (b.onclick = () => openDialog(b.dataset.open)));
 $$('[data-act]').forEach((b) => (b.onclick = () => {
   const a = b.dataset.act;
@@ -515,6 +531,7 @@ form.addEventListener('input', (e) => {
   settings[el.name] = v;
   sound.volume = settings.volume;
   save('pictris.settings', settings);
+  if (el.name === 'experience') renderExp();
   if (el.name === 'captions') setCaption(photos.find((p) => p.id === currentPhotoId));
   if ((el.name === 'order' || el.name === 'span') && game) {
     for (const k of [...picks.keys()]) if (k >= game.level) picks.delete(k);
