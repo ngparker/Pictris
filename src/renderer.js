@@ -472,7 +472,7 @@ export class Renderer {
     const focus = game ? Math.min(1, Math.max(0, v.focus || 0)) : 0;
     const exp = game ? s.experience : 'menu';
     let dim, blur;
-    if (exp === 'mosaic') { dim = 0.8; blur = 3; }
+    if (exp === 'mosaic') { dim = 0.72; blur = 3; }
     else if (exp === 'living') { dim = s.dim * 0.5; blur = 0; }
     else if (exp === 'focus') { dim = s.dim * (1 - 0.8 * focus); blur = s.blur * (1 - focus); }
     else { dim = s.dim * 0.6; blur = Math.min(s.blur, 0.25); }
