@@ -260,7 +260,7 @@ export class Renderer {
   /** A jittered grid of blob sites covering the screen, ordered centre-first with a ragged edge. */
   buildBlobs(L) {
     const minD = Math.min(L.W, L.H);
-    const sp = minD * 0.16;
+    const sp = minD * 0.115;
     const cols = Math.ceil(L.W / sp) + 1, rows = Math.ceil(L.H / sp) + 1;
     const cx = L.W / 2, cy = L.H * 0.4, Rn = Math.max(L.W, L.H) / 2;
     const list = [];
@@ -268,7 +268,7 @@ export class Renderer {
       const x = (q - 0.5 + Math.random()) * sp, y = (r - 0.5 + Math.random()) * sp;
       const dist = Math.hypot((x - cx) / Rn, ((y - cy) / Rn) * 1.15);
       const prio = dist < 0.85 && Math.random() < 0.04 ? Math.random() * 0.9 : dist + (Math.random() - 0.5) * 0.4;
-      list.push({ x, y, R: sp * (1.1 + Math.random() * 0.5), phase: Math.random() * 6.283, prio, at: -1 });
+      list.push({ x, y, R: sp * (1.1 + Math.random() * 0.45), phase: Math.random() * 6.283, prio, at: -1, sx: x, sy: y, dur: 1 });
     }
     list.sort((a, b) => a.prio - b.prio);
     const prev = this.blobs;
@@ -281,7 +281,14 @@ export class Renderer {
   blobsAdvance(target, now) {
     const B = this.blobs;
     target = Math.min(B.list.length, target);
-    for (let k = B.home; k < target; k++) B.list[k].at = now + (k - B.home) * 140 + Math.random() * 120;
+    for (let k = B.home; k < target; k++) {
+      const b = B.list[k];
+      b.at = now + (k - B.home) * 110 + Math.random() * 120;
+      const fromLeft = b.x < B.W / 2;
+      b.sx = fromLeft ? -b.R : B.W + b.R;
+      b.sy = b.y + (Math.random() - 0.5) * B.H * 0.25;
+      b.dur = 1100 + (Math.abs(b.x - b.sx) / B.W) * 1300;
+    }
     B.home = Math.max(B.home, target);
   }
 
@@ -327,18 +334,18 @@ export class Renderer {
     this.blobsAdvance(Math.floor(progress * this.blobs.list.length + 1e-6), now);
     const d = this.blobData;
     let n = 0, o = 0;
-    const GROW = reduceMotion ? 1 : 1500;
     for (let k = 0; k < this.blobs.home && n < MAX_BLOBS; k++) {
       const b = this.blobs.list[k];
-      const t = (now - b.at) / GROW;
+      const t = reduceMotion ? 1 : (now - b.at) / b.dur;
       if (t <= 0) continue;
-      // easeOutBack: swell slightly past full size, then settle.
+      // Roll in along a gentle arc, overshoot a touch, settle; the blob swells as it arrives.
       const u = Math.min(1, t) - 1;
-      const grow = reduceMotion ? 1 : 1 + 2.2 * u * u * u + 1.2 * u * u;
+      const e = 1 + 2.0 * u * u * u + 1.0 * u * u; // easeOutBack
+      const arc = Math.sin(Math.min(1, t) * Math.PI) * b.R * 0.6;
       const breathe = reduceMotion ? 1 : 1 + 0.05 * Math.sin(now / 1100 + b.phase);
-      const r = b.R * grow * breathe;
-      const x = b.x + (reduceMotion ? 0 : Math.sin(now / 2300 + b.phase) * b.R * 0.05);
-      const y = b.y + (reduceMotion ? 0 : Math.cos(now / 2700 + b.phase) * b.R * 0.05);
+      const r = b.R * (0.65 + 0.35 * Math.min(1, t)) * breathe;
+      const x = b.sx + (b.x - b.sx) * e + (reduceMotion ? 0 : Math.sin(now / 2300 + b.phase) * b.R * 0.05);
+      const y = b.sy + (b.y - b.sy) * e - arc + (reduceMotion ? 0 : Math.cos(now / 2700 + b.phase) * b.R * 0.05);
       for (const [lx, ly] of [[0, 0], [1, 0], [0, 1], [0, 1], [1, 0], [1, 1]]) {
         d[o++] = x + (lx * 2 - 1) * r; d[o++] = y + (ly * 2 - 1) * r;
         d[o++] = lx; d[o++] = ly; d[o++] = 1;
