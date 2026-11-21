@@ -72,18 +72,29 @@ void main(){
   vec2 luv = (uv-0.5)/uZoom + 0.5 + drift*0.6;
   luv += uPar * (depth(luv) - 0.45) * 0.028;
   if (uMode == 1) {
-    // Blobs: sharp photo where the field passes the threshold; a soft lens rim where blobs meet the ghost.
+    // Blobs read as water drops: the field is treated as a surface height. Near the edge the surface
+    // tilts, so the photo is refracted (magnified inward, with a faint colour fringe), the edge facing
+    // the light catches a specular highlight, and a soft shadow sits just outside the drop.
     const float thr = 0.42;
-    vec2 px = 3. / vec2(textureSize(uField, 0)) * 0.25;
+    vec2 tx = 1. / vec2(textureSize(uField, 0));
     float f = texture(uField, vUv).r + uFill;
-    float fx = texture(uField, vUv + vec2(px.x, 0.)).r - texture(uField, vUv - vec2(px.x, 0.)).r;
-    float fy = texture(uField, vUv + vec2(0., px.y)).r - texture(uField, vUv - vec2(0., px.y)).r;
-    float mask = smoothstep(thr - 0.035, thr + 0.035, f);
-    float rim = exp(-pow((f - thr) / 0.07, 2.));
-    vec3 ph = sharpAt(uv - vec2(fx, -fy) * 0.035 * rim);
-    ph *= 1. + 0.10 * rim * clamp(fy * 6. + 0.4, 0., 1.);
+    vec2 g = vec2(texture(uField, vUv + vec2(tx.x, 0.)).r - texture(uField, vUv - vec2(tx.x, 0.)).r,
+                  texture(uField, vUv + vec2(0., tx.y)).r - texture(uField, vUv - vec2(0., tx.y)).r);
+    float gl = length(g);
+    vec2 inward = gl > 1e-4 ? g / gl : vec2(0.);          // in vUv space (y up), toward the drop centre
+    vec2 inUv = vec2(inward.x, -inward.y);                 // same direction in photo uv space (y down)
+    float mask = smoothstep(thr - 0.03, thr + 0.03, f);
+    float edge = 1. - smoothstep(thr, thr + 0.30, f);      // 1 at the edge, 0 deep inside the drop
+    float tilt = edge * edge * mask;
+    float k = 0.022 * tilt;
+    vec3 ph = vec3(sharpAt(uv + inUv * k * 1.15).r, sharpAt(uv + inUv * k).g, sharpAt(uv + inUv * k * 0.85).b);
+    ph *= 1. + 0.12 * tilt;                                 // a little fresnel brightening at the rim
+    float facing = max(dot(inward, normalize(vec2(0.75, -1.))), 0.);  // edge facing the top-left light
+    float spec = pow(facing, 3.) * smoothstep(0.55, 1.0, edge) * mask;
+    float glint = pow(facing, 12.) * exp(-pow((f - thr - 0.06) / 0.04, 2.)) * mask;
+    c *= 1. - 0.35 * exp(-pow((f - thr + 0.06) / 0.06, 2.)) * (1. - mask);  // contact shadow outside
     c = mix(c, ph, mask);
-    c += vec3(1.) * rim * 0.05 * mask;
+    c += vec3(1.0, 0.98, 0.94) * (spec * 0.22 + glint * 0.45);
   }
   if (uMode == 2) {
     c = grade(sharpAt(luv), uv, uFocus) * (1. - uDim*0.35);
