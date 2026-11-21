@@ -79,18 +79,20 @@ void main(){
   c *= mix(0.55, 1.0, v);
   if (uReveal > 0.) {
     // Level-up moment: pull focus and ease from cover-fit out to the whole photo.
-    vec2 ruv = uMode == 2 ? mix(luv, uv, uReveal) : uv;
-    vec2 p0 = cover(ruv, mix(uC0, uF0, uReveal)), p1 = cover(ruv, mix(uC1, uF1, uReveal));
+    float w = smoothstep(0., 0.3, uReveal);   // content: current look -> true photo
+    float gz = smoothstep(0.3, 1., uReveal);  // geometry: cover -> whole frame, only once w is complete
+    vec2 ruv = uMode == 2 ? mix(luv, uv, gz) : uv;
+    vec2 p0 = cover(ruv, mix(uC0, uF0, gz)), p1 = cover(ruv, mix(uC1, uF1, gz));
     vec2 e0 = smoothstep(vec2(0.), vec2(0.004), p0) * smoothstep(vec2(0.), vec2(0.004), 1.-p0);
     vec2 e1 = smoothstep(vec2(0.), vec2(0.004), p1) * smoothstep(vec2(0.), vec2(0.004), 1.-p1);
     float m0 = e0.x*e0.y*uH0, m1 = e1.x*e1.y*uH1;
     vec3 sharp = mix(texture(uT0, p0).rgb, texture(uT1, p1).rgb, uMix);
-    if (uMode == 2) sharp = mix(grade(sharp, uv, 1.), sharp, uReveal);
+    if (uMode == 2) sharp = mix(grade(sharp, uv, 1.), sharp, gz);
     float m = mix(m0, m1, uMix);
     float band = exp(-pow((uv.x + uv.y*0.35 - (uShine*1.9 - 0.3))*5., 2.));
     sharp += band*0.10;
     if (uMode == 2) sharp += vec3(1.0, 0.8, 0.55) * 0.10 * sin(3.14159*uReveal);
-    c = mix(c*(1.-0.45*uReveal), sharp, m*uReveal);
+    c = mix(c*(1.-0.45*w), sharp, m*w);
   }
   o = vec4(c,1.);
 }`;

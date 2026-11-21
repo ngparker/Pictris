@@ -202,7 +202,15 @@ function placeHud() {
   st.classList.toggle('row', !!L.portrait);
   document.body.classList.toggle('portrait', !!L.portrait);
   $('#toast').style.top = px(L.by + L.bh * 0.42);
-  $('#caption').style.top = px(L.by + L.bh + L.cell * 0.35);
+  const cap = $('#caption');
+  if (L.portrait) {
+    // Phone: the date sits at the right end of the stats row (where Best would be).
+    cap.style.top = px(L.stats.y + L.cell * 0.45);
+    cap.style.right = px(L.W - (L.stats.x + L.stats.w));
+  } else {
+    cap.style.top = px(L.by + L.bh + L.cell * 0.35);
+    cap.style.right = '';
+  }
 }
 
 let toastTimer;
