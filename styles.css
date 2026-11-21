@@ -146,3 +146,4 @@ body.portrait #hud .label { font-size: 10px; }
   #stats { gap: 6px; }
 }
 @media (prefers-reduced-motion: reduce) { #toast, #caption { transition: none; } }
+#menuShareStatus:empty { display: none; }
