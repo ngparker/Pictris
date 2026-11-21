@@ -87,7 +87,7 @@ function photoForGame(level, mode = game?.mode) {
 /** Make `level`'s photo the current one, record it, and warm up the next. */
 function showLevelPhoto(level, mode = game?.mode) {
   focus = 0;
-  renderer.resetMosaic(); // a new level always assembles from scratch, even when the photo repeats
+  renderer.resetBlobs(); // a new level always starts from scratch, even when the photo repeats
   const rec = photoForGame(level, mode);
   showPhoto(rec);
   setCaption(rec);
@@ -232,7 +232,7 @@ function setCaption(rec, bright = false) {
 
 // Level-up moment: the board fades, the finished photo comes into full focus, then the next one drifts in.
 const CEL = { in: 450, hold: 1500, out: 700 };
-const SEAL = 1100; // mosaic only: last tiles land, then gaps close, before the reveal starts
+const SEAL = 1300; // blobs only: the last blobs swell in, then the photo floods together, before the reveal
 const ease01 = (x) => Math.min(1, Math.max(0, x));
 let celebrate = null; // { t, level, switched }
 const ease = (x) => x * x * (3 - 2 * x);
@@ -482,7 +482,7 @@ function frame(now) {
     if (menuTimer > 14000) { menuTimer = 0; menuSlide(); }
   }
   renderer.render({ game: state === 'menu' ? null : game, time: now, dt, settings,
-    focus, reveal: revealAmount(), seal: celebrate && !celebrate.switched ? ease01((celebrate.t + 350) / 350) : 0, shine: celebrate ? celebrate.t / (CEL.in + CEL.hold) : 0 });
+    focus, reveal: revealAmount(), seal: celebrate && !celebrate.switched ? ease01((celebrate.t + 700) / 700) : 0, shine: celebrate ? celebrate.t / (CEL.in + CEL.hold) : 0 });
   requestAnimationFrame(frame);
 }
 
@@ -529,6 +529,12 @@ function fillSettings() {
     const v = settings[el.name];
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
   }
+  showRelevantSettings();
+}
+/** Hide settings that do nothing for the chosen photo style / block style. */
+function showRelevantSettings() {
+  for (const el of form.querySelectorAll('[data-for-exp]')) el.hidden = !el.dataset.forExp.split(' ').includes(settings.experience);
+  for (const el of form.querySelectorAll('[data-for-block]')) el.hidden = el.dataset.forBlock !== settings.blockStyle;
 }
 form.addEventListener('input', (e) => {
   const el = e.target;
@@ -540,6 +546,7 @@ form.addEventListener('input', (e) => {
   sound.volume = settings.volume;
   save('pictris.settings', settings);
   if (el.name === 'experience') renderExp();
+  if (el.name === 'experience' || el.name === 'blockStyle') showRelevantSettings();
   if (el.name === 'captions') setCaption(photos.find((p) => p.id === currentPhotoId));
   if ((el.name === 'order' || el.name === 'span') && game) {
     for (const k of [...picks.keys()]) if (k >= game.level) picks.delete(k);

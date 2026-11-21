@@ -1,7 +1,7 @@
-// WebGL2 renderer: photo backdrop + batched rounded quads (blocks, panels, mosaic tiles).
+// WebGL2 renderer: photo backdrop + batched rounded quads (blocks, panels).
 // Three photo experiences, all driven by `focus` = progress through the current level (0..1):
 //   focus  - the photo starts blurred and dim and sharpens as you clear lines
-//   mosaic - the photo assembles from tiles, centre first, as you clear lines
+//   mosaic - "Blobs": the photo blooms in as soft blobs that merge, centre first, as you clear lines
 //   living - a sharp photo with gentle parallax, lit from dawn to golden hour to full light
 
 import { COLS, VISIBLE, HIDDEN, CELLS, TYPES, CLEAR_DELAY, LOCK_DELAY } from './game.js';
@@ -22,8 +22,9 @@ uniform sampler2D uT0, uT1;
 uniform vec2 uC0, uC1;
 uniform float uH0, uH1, uMix, uDim, uBlur, uTime, uReveal, uShine;
 uniform vec2 uF0, uF1;
-uniform int uMode;          // 0 focus, 1 mosaic (ghost backdrop), 2 living
-uniform float uFocus, uSweep, uZoom, uAspect;
+uniform int uMode;          // 0 focus, 1 blobs, 2 living
+uniform float uFocus, uSweep, uZoom, uAspect, uFill;
+uniform sampler2D uField;   // blobs: summed metaball field (low-res)
 uniform vec2 uPar;
 vec2 cover(vec2 uv, vec2 s){ return (uv-0.5)*s+0.5; }
 
@@ -70,6 +71,20 @@ void main(){
   c *= 1.-uDim;
   vec2 luv = (uv-0.5)/uZoom + 0.5 + drift*0.6;
   luv += uPar * (depth(luv) - 0.45) * 0.028;
+  if (uMode == 1) {
+    // Blobs: sharp photo where the field passes the threshold; a soft lens rim where blobs meet the ghost.
+    const float thr = 0.42;
+    vec2 px = 3. / vec2(textureSize(uField, 0)) * 0.25;
+    float f = texture(uField, vUv).r + uFill;
+    float fx = texture(uField, vUv + vec2(px.x, 0.)).r - texture(uField, vUv - vec2(px.x, 0.)).r;
+    float fy = texture(uField, vUv + vec2(0., px.y)).r - texture(uField, vUv - vec2(0., px.y)).r;
+    float mask = smoothstep(thr - 0.035, thr + 0.035, f);
+    float rim = exp(-pow((f - thr) / 0.07, 2.));
+    vec3 ph = sharpAt(uv - vec2(fx, -fy) * 0.035 * rim);
+    ph *= 1. + 0.10 * rim * clamp(fy * 6. + 0.4, 0., 1.);
+    c = mix(c, ph, mask);
+    c += vec3(1.) * rim * 0.05 * mask;
+  }
   if (uMode == 2) {
     c = grade(sharpAt(luv), uv, uFocus) * (1. - uDim*0.35);
     float band = exp(-pow((uv.x*0.85 + uv.y*0.45 - (uSweep*1.9 - 0.45))*6., 2.));
@@ -98,20 +113,19 @@ void main(){
 }`;
 
 const Q_VS = `#version 300 es
-in vec2 aPos; in vec2 aLocal; in vec2 aSize; in vec4 aColor; in vec4 aParams; in vec4 aHome;
+in vec2 aPos; in vec2 aLocal; in vec2 aSize; in vec4 aColor; in vec4 aParams;
 uniform vec2 uRes;
-out vec2 vLocal; out vec2 vSize; out vec4 vColor; out vec4 vParams; out vec4 vHome;
+out vec2 vLocal; out vec2 vSize; out vec4 vColor; out vec4 vParams;
 void main(){
-  vLocal=aLocal; vSize=aSize; vColor=aColor; vParams=aParams; vHome=aHome;
+  vLocal=aLocal; vSize=aSize; vColor=aColor; vParams=aParams;
   vec2 c = aPos/uRes*2.-1.;
   gl_Position = vec4(c.x, -c.y, 0., 1.);
 }`;
 
-// params: x=mode (0 solid,1 reveal background photo,2 ghost,3 panel,4 mosaic tile), y=flash, z=tint/bevel, w=radius(px)
-// home: for mosaic tiles, the screen rect (px) of the photo patch the tile carries, wherever it is drawn.
+// params: x=mode (0 solid,1 reveal background photo,2 ghost,3 panel,4 outline), y=flash, z=tint (outline: width px), w=radius(px)
 const Q_FS = `#version 300 es
 precision highp float;
-in vec2 vLocal; in vec2 vSize; in vec4 vColor; in vec4 vParams; in vec4 vHome;
+in vec2 vLocal; in vec2 vSize; in vec4 vColor; in vec4 vParams;
 out vec4 o;
 uniform sampler2D uT0, uT1;
 uniform vec2 uC0, uC1, uRes;
@@ -129,15 +143,8 @@ void main(){
   float alpha = vColor.a;
   if (mode == 3) { o = vec4(col*alpha*aa, alpha*aa); return; }
   if (mode == 4) {
-    vec2 suv = (vHome.xy + vLocal*vHome.zw) / uRes;
-    vec3 a = uH0>0.5 ? texture(uT0, cover(suv,uC0)).rgb : vec3(0.1);
-    vec3 b = uH1>0.5 ? texture(uT1, cover(suv,uC1)).rgb : vec3(0.1);
-    vec3 ph = mix(a,b,uMix);
-    float edge = min(min(vLocal.x,1.-vLocal.x)*vSize.x, min(vLocal.y,1.-vLocal.y)*vSize.y);
-    float rim = 1.-smoothstep(0., max(1.5, vSize.x*0.10), edge);
-    ph *= 1. + rim*((0.5-vLocal.y) + (0.5-vLocal.x)*0.5)*0.5*vParams.z;
-    ph = mix(ph, vec3(1.), vParams.y);
-    o = vec4(ph*alpha*aa, alpha*aa); return;
+    float ring = aa - clamp(0.5-(d+vParams.z), 0., 1.);
+    o = vec4(col*alpha*ring, alpha*ring); return;
   }
   if (mode == 2) {
     float bw = max(1.5, vSize.x*0.07);
@@ -182,10 +189,19 @@ function compile(gl, vs, fs) {
   return { p, u };
 }
 
-const FLOATS = 18; // per vertex
-const MAX_QUADS = 3200;
-const NO_HOME = [0, 0, 0, 0];
-const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+const FLOATS = 14; // per vertex
+const MAX_QUADS = 1500;
+const MAX_BLOBS = 600;
+
+const BLOB_VS = `#version 300 es
+in vec2 aPos; in vec2 aLocal; in float aK;
+uniform vec2 uRes;
+out vec2 vL; out float vK;
+void main(){ vL = aLocal*2.-1.; vK = aK; vec2 c = aPos/uRes*2.-1.; gl_Position = vec4(c.x, -c.y, 0., 1.); }`;
+const BLOB_FS = `#version 300 es
+precision highp float;
+in vec2 vL; in float vK; out vec4 o;
+void main(){ float d2 = dot(vL, vL); if (d2 >= 1.) discard; float f = 1.-d2; o = vec4(vec3(f*f*f*vK), 1.); }`;
 
 export class Renderer {
   constructor(canvas) {
@@ -212,7 +228,7 @@ export class Renderer {
     this.data = new Float32Array(FLOATS * 6 * MAX_QUADS);
     gl.bufferData(gl.ARRAY_BUFFER, this.data.byteLength, gl.DYNAMIC_DRAW);
     let off = 0;
-    for (const [name, size] of [['aPos', 2], ['aLocal', 2], ['aSize', 2], ['aColor', 4], ['aParams', 4], ['aHome', 4]]) {
+    for (const [name, size] of [['aPos', 2], ['aLocal', 2], ['aSize', 2], ['aColor', 4], ['aParams', 4]]) {
       const l = gl.getAttribLocation(this.q.p, name);
       gl.enableVertexAttribArray(l);
       gl.vertexAttribPointer(l, size, gl.FLOAT, false, FLOATS * 4, off * 4);
@@ -228,7 +244,8 @@ export class Renderer {
     this.n = 0;
     this.fade = 1;
     this.layout = null;
-    this.mosaic = null;
+    this.blobs = null;
+    this.field = null;
     this.par = [0, 0];
     this.sweep = -1;
   }
@@ -236,88 +253,117 @@ export class Renderer {
   /** Living: a light sweep across the photo (called on line clears). */
   pulse() { this.sweep = 0; }
 
-  // ---------- mosaic ----------
-  /** Tile grid aligned to the board cells, covering the screen; rank order is centre-first with jitter. */
-  buildMosaic(L) {
-    const c = L.cell;
-    const x0 = L.bx - Math.ceil(L.bx / c) * c, y0 = L.by - Math.ceil(L.by / c) * c;
-    const cols = Math.ceil((L.W - x0) / c), rows = Math.ceil((L.H - y0) / c);
-    const n = cols * rows;
-    const prio = new Float32Array(n);
-    const cx = L.W / 2, cy = L.H * 0.4, R = Math.max(L.W, L.H) / 2;
+  // ---------- blobs (the "mosaic" style) ----------
+  // Soft metaballs are summed into a low-res field texture; the background shader shows the sharp
+  // photo wherever the field passes a threshold, so neighbouring blobs bridge and merge like liquid.
+
+  /** A jittered grid of blob sites covering the screen, ordered centre-first with a ragged edge. */
+  buildBlobs(L) {
+    const minD = Math.min(L.W, L.H);
+    const sp = minD * 0.16;
+    const cols = Math.ceil(L.W / sp) + 1, rows = Math.ceil(L.H / sp) + 1;
+    const cx = L.W / 2, cy = L.H * 0.4, Rn = Math.max(L.W, L.H) / 2;
+    const list = [];
     for (let r = 0; r < rows; r++) for (let q = 0; q < cols; q++) {
-      const i = r * cols + q;
-      const dx = (x0 + (q + 0.5) * c - cx) / R, dy = (y0 + (r + 0.5) * c - cy) / R;
-      const dist = Math.hypot(dx, dy * 1.15);
-      // Centre first, with a ragged frontier, and a few stray tiles that land early anywhere.
-      prio[i] = dist < 0.85 && Math.random() < 0.025 ? Math.random() * 0.9 : dist + (Math.random() - 0.5) * 0.4;
+      const x = (q - 0.5 + Math.random()) * sp, y = (r - 0.5 + Math.random()) * sp;
+      const dist = Math.hypot((x - cx) / Rn, ((y - cy) / Rn) * 1.15);
+      const prio = dist < 0.85 && Math.random() < 0.04 ? Math.random() * 0.9 : dist + (Math.random() - 0.5) * 0.4;
+      list.push({ x, y, R: sp * (1.1 + Math.random() * 0.5), phase: Math.random() * 6.283, prio, at: -1 });
     }
-    const order = Int32Array.from({ length: n }, (_, i) => i).sort((a, b) => prio[a] - prio[b]);
-    const prev = this.mosaic;
-    this.mosaic = {
-      x0, y0, cols, rows, n, cell: c, order,
-      arrive: new Float64Array(n).fill(-1),
-      from: new Float32Array(n * 4), // start x,y and curve control x,y
-      home: 0, W: L.W, H: L.H,
-    };
-    // A rebuild mid-level (resize) keeps the same share of tiles in place, already landed.
-    if (prev) this.mosaicAdvance(Math.round((prev.home / prev.n) * n), -1e9);
+    list.sort((a, b) => a.prio - b.prio);
+    const prev = this.blobs;
+    this.blobs = { list, home: 0, W: L.W, H: L.H };
+    if (prev) this.blobsAdvance(Math.round((prev.home / prev.list.length) * list.length), -1e9);
   }
 
-  resetMosaic() { if (this.mosaic) { this.mosaic.home = 0; this.mosaic.arrive.fill(-1); } }
+  resetBlobs() { if (this.blobs) { this.blobs.home = 0; for (const b of this.blobs.list) b.at = -1; } }
 
-  mosaicAdvance(target, now) {
-    const m = this.mosaic;
-    target = Math.min(m.n, target);
-    const batch = target - m.home;
-    for (let k = 0; k < batch; k++) {
-      const i = m.order[m.home + k];
-      const q = i % m.cols, r = (i / m.cols) | 0;
-      const hx = m.x0 + q * m.cell, hy = m.y0 + r * m.cell;
-      // Fly in from beyond the edge, roughly away from the centre, on a gently curving path.
-      let dx = hx - m.W / 2, dy = hy - m.H * 0.4;
-      const len = Math.hypot(dx, dy) || 1;
-      dx /= len; dy /= len;
-      const a = (Math.random() - 0.5) * 1.2;
-      const ux = dx * Math.cos(a) - dy * Math.sin(a), uy = dx * Math.sin(a) + dy * Math.cos(a);
-      const dist = Math.max(m.W, m.H) * (0.35 + Math.random() * 0.3);
-      const sx = hx + ux * dist, sy = hy + uy * dist;
-      const bend = (Math.random() - 0.5) * dist * 0.6;
-      m.from.set([sx, sy, (sx + hx) / 2 - uy * bend, (sy + hy) / 2 + ux * bend], i * 4);
-      m.arrive[i] = now + Math.min(k * 9, 500) + Math.random() * 160;
-    }
-    m.home = Math.max(m.home, target);
+  blobsAdvance(target, now) {
+    const B = this.blobs;
+    target = Math.min(B.list.length, target);
+    for (let k = B.home; k < target; k++) B.list[k].at = now + (k - B.home) * 140 + Math.random() * 120;
+    B.home = Math.max(B.home, target);
   }
 
-  drawMosaic(now, progress, seal, reduceMotion) {
-    const L = this.layout;
-    if (!this.mosaic || this.mosaic.W !== L.W || this.mosaic.H !== L.H || this.mosaic.cell !== L.cell) this.buildMosaic(L);
-    const m = this.mosaic;
-    this.mosaicAdvance(Math.floor(progress * m.n + 1e-6), now);
-    const c = m.cell;
-    const gap = Math.max(1, c * 0.045) * (1 - seal);
-    const rad = c * 0.1 * (1 - seal);
-    const FLY = reduceMotion ? 1 : 1050;
-    for (let k = 0; k < m.home; k++) {
-      const i = m.order[k];
-      const t = (now - m.arrive[i]) / FLY;
-      if (t < 0) continue;
-      const q = i % m.cols, r = (i / m.cols) | 0;
-      const hx = m.x0 + q * c + gap / 2, hy = m.y0 + r * c + gap / 2, hs = c - gap;
-      const home = [hx, hy, hs, hs];
-      if (t >= 1 || reduceMotion) {
-        this.quad(hx, hy, hs, hs, [1, 1, 1], 1, 4, 0, 1 - seal, rad, home);
-        continue;
+  ensureField(L) {
+    const gl = this.gl;
+    const fw = Math.max(1, Math.ceil(L.W / 4)), fh = Math.max(1, Math.ceil(L.H / 4));
+    if (this.field && this.field.w === fw && this.field.h === fh) return;
+    if (!this.field) {
+      this.field = { tex: gl.createTexture(), fbo: gl.createFramebuffer() };
+      this.blobProg = compile(gl, BLOB_VS, BLOB_FS);
+      this.blobVao = gl.createVertexArray();
+      gl.bindVertexArray(this.blobVao);
+      this.blobBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.blobBuf);
+      this.blobData = new Float32Array(MAX_BLOBS * 6 * 5);
+      gl.bufferData(gl.ARRAY_BUFFER, this.blobData.byteLength, gl.DYNAMIC_DRAW);
+      let off = 0;
+      for (const [name, size] of [['aPos', 2], ['aLocal', 2], ['aK', 1]]) {
+        const l = gl.getAttribLocation(this.blobProg.p, name);
+        gl.enableVertexAttribArray(l);
+        gl.vertexAttribPointer(l, size, gl.FLOAT, false, 20, off * 4);
+        off += size;
       }
-      const e = easeOut(t), u = 1 - e;
-      const f = m.from;
-      const px = u * u * f[i * 4] + 2 * u * e * f[i * 4 + 2] + e * e * hx;
-      const py = u * u * f[i * 4 + 1] + 2 * u * e * f[i * 4 + 3] + e * e * hy;
-      const sc = 0.55 + 0.45 * e;
-      const sz = hs * sc;
-      this.quad(px + (hs - sz) / 2, py + (hs - sz) / 2, sz, sz, [1, 1, 1], Math.min(1, t * 3), 4, 0.18 * u, 1, rad * sc, home);
+      gl.bindVertexArray(null);
     }
+    Object.assign(this.field, { w: fw, h: fh });
+    gl.bindTexture(gl.TEXTURE_2D, this.field.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, fw, fh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.field.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.field.tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
+
+  /** Render the blob field for this frame. Blobs swell in with a soft overshoot, then breathe gently. */
+  drawField(now, progress, reduceMotion) {
+    const gl = this.gl, L = this.layout;
+    this.ensureField(L);
+    if (!this.blobs || this.blobs.W !== L.W || this.blobs.H !== L.H) this.buildBlobs(L);
+    this.blobsAdvance(Math.floor(progress * this.blobs.list.length + 1e-6), now);
+    const d = this.blobData;
+    let n = 0, o = 0;
+    const GROW = reduceMotion ? 1 : 1500;
+    for (let k = 0; k < this.blobs.home && n < MAX_BLOBS; k++) {
+      const b = this.blobs.list[k];
+      const t = (now - b.at) / GROW;
+      if (t <= 0) continue;
+      // easeOutBack: swell slightly past full size, then settle.
+      const u = Math.min(1, t) - 1;
+      const grow = reduceMotion ? 1 : 1 + 2.2 * u * u * u + 1.2 * u * u;
+      const breathe = reduceMotion ? 1 : 1 + 0.05 * Math.sin(now / 1100 + b.phase);
+      const r = b.R * grow * breathe;
+      const x = b.x + (reduceMotion ? 0 : Math.sin(now / 2300 + b.phase) * b.R * 0.05);
+      const y = b.y + (reduceMotion ? 0 : Math.cos(now / 2700 + b.phase) * b.R * 0.05);
+      for (const [lx, ly] of [[0, 0], [1, 0], [0, 1], [0, 1], [1, 0], [1, 1]]) {
+        d[o++] = x + (lx * 2 - 1) * r; d[o++] = y + (ly * 2 - 1) * r;
+        d[o++] = lx; d[o++] = ly; d[o++] = 1;
+      }
+      n++;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.field.fbo);
+    gl.viewport(0, 0, this.field.w, this.field.h);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (n) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.useProgram(this.blobProg.p);
+      gl.uniform2f(this.blobProg.u.uRes, L.W, L.H);
+      gl.bindVertexArray(this.blobVao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.blobBuf);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, d, 0, n * 30);
+      gl.drawArrays(gl.TRIANGLES, 0, n * 6);
+      gl.bindVertexArray(null);
+      gl.disable(gl.BLEND);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
 
   makeTex() {
     const gl = this.gl;
@@ -345,7 +391,7 @@ export class Renderer {
     } else {
       this.slots[next] = null;
     }
-    this.resetMosaic();
+    this.resetBlobs();
     this.fading = true;
     this.mix = instant ? 1 : 0;
     if (instant) this.finishFade();
@@ -412,7 +458,7 @@ export class Renderer {
     return I > A ? [A / I, 1] : [1, I / A];
   }
 
-  quad(x, y, w, h, color, alpha, mode, flash = 0, tint = 0, radius = 0, home = NO_HOME) {
+  quad(x, y, w, h, color, alpha, mode, flash = 0, tint = 0, radius = 0) {
     if (this.n >= MAX_QUADS) return;
     alpha *= this.fade;
     const d = this.data;
@@ -424,7 +470,6 @@ export class Renderer {
       d[o++] = w; d[o++] = h;
       d[o++] = color[0]; d[o++] = color[1]; d[o++] = color[2]; d[o++] = alpha;
       d[o++] = mode; d[o++] = flash; d[o++] = tint; d[o++] = radius;
-      d[o++] = home[0]; d[o++] = home[1]; d[o++] = home[2]; d[o++] = home[3];
     }
     this.n++;
   }
@@ -460,6 +505,9 @@ export class Renderer {
     const t0 = this.cur, t1 = 1 - this.cur;
     const has0 = this.slots[t0] ? 1 : 0, has1 = this.slots[t1] ? 1 : 0;
 
+    const exp = game ? s.experience : 'menu';
+    const focus = game ? Math.min(1, Math.max(0, v.focus || 0)) : 0;
+    if (exp === 'mosaic') this.drawField(v.time, focus, s.reduceMotion);
     gl.viewport(0, 0, L.W, L.H);
     gl.disable(gl.BLEND);
     gl.useProgram(this.bg.p);
@@ -471,8 +519,6 @@ export class Renderer {
     gl.uniform1f(U.uH0, s.background ? has0 : 0); gl.uniform1f(U.uH1, s.background ? has1 : 0);
     gl.uniform1f(U.uMix, this.fading ? this.mix : 0);
     // focus: 0 at the start of a level, 1 when it is nearly complete.
-    const focus = game ? Math.min(1, Math.max(0, v.focus || 0)) : 0;
-    const exp = game ? s.experience : 'menu';
     let dim, blur;
     if (exp === 'mosaic') { dim = 0.72; blur = 3; }
     else if (exp === 'living') { dim = s.dim * 0.5; blur = 0; }
@@ -481,6 +527,9 @@ export class Renderer {
     gl.uniform1f(U.uDim, dim);
     gl.uniform1f(U.uBlur, blur);
     gl.uniform1i(U.uMode, exp === 'mosaic' ? 1 : exp === 'living' ? 2 : 0);
+    gl.uniform1f(U.uFill, (v.seal || 0) * 0.6);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.field ? this.field.tex : null);
+    gl.uniform1i(U.uField, 2);
     gl.uniform1f(U.uFocus, focus);
     gl.uniform1f(U.uAspect, L.W / L.H);
     // Living: the camera eases in as the level progresses, and sways a little with the falling piece.
@@ -508,10 +557,13 @@ export class Renderer {
     this.n = 0;
     const { cell, bx, by, bw, bh } = L;
     if (!game) return this.flush(has0, has1, t0, t1);
-    if (exp === 'mosaic') this.drawMosaic(v.time, focus, v.seal || 0, s.reduceMotion);
     const panel = [0.02, 0.025, 0.04];
-    const boardAlpha = s.boardOpacity * (exp === 'mosaic' ? 0.6 * (1 - 0.45 * focus) : exp === 'living' ? 1 - 0.25 * focus : 1 - 0.7 * focus);
-    this.quad(bx - 3, by - 3, bw + 6, bh + 6, panel, boardAlpha, 3, 0, 0, Math.max(4, cell * 0.2));
+    const boardAlpha = s.boardOpacity * (exp === 'mosaic' ? 0.85 * (1 - 0.3 * focus) : exp === 'living' ? 1 - 0.25 * focus : 1 - 0.7 * focus);
+    const br = Math.max(4, cell * 0.2);
+    this.quad(bx - 3, by - 3, bw + 6, bh + 6, panel, boardAlpha, 3, 0, 0, br);
+    // A clear edge, so the well stays readable over a busy photo.
+    const lw = Math.max(1.5, L.dpr * 1.25);
+    this.quad(bx - 3 - lw, by - 3 - lw, bw + 6 + 2 * lw, bh + 6 + 2 * lw, [0.85, 0.9, 1], exp === 'mosaic' ? 0.42 : 0.22, 4, 0, lw, br + lw);
     for (const p of [L.hold, L.next]) this.quad(p.x, p.y, p.w, p.h, panel, s.boardOpacity * 0.85, 3, 0, 0, cell * 0.25);
     // faint grid
     const gc = [1, 1, 1];
