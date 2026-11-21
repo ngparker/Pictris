@@ -374,11 +374,24 @@ const input = {
   },
 };
 
+// Shift holds on release, and only if no other key was pressed meanwhile, so Shift+L (the demo
+// key) doesn't also hold the piece. C still holds instantly.
+let shiftTap = false;
+
 addEventListener('keydown', (e) => {
   if (document.querySelector('dialog[open]')) return;
+  if (e.target.matches?.('input, select, textarea')) return;
+  const isShift = e.code === 'ShiftLeft' || e.code === 'ShiftRight';
+  if (isShift) { if (!e.repeat) shiftTap = state === 'play'; e.preventDefault(); return; }
+  shiftTap = false;
+  // Demo: capital L (Shift+L or Caps Lock) counts a line as cleared. Ignored during the level-up moment.
+  if (e.key === 'L' && state === 'play' && game && !game.over) {
+    e.preventDefault();
+    if (!celebrate && !e.repeat) game.cheatLine();
+    return;
+  }
   const act = KEYMAP[e.code];
   if (!act) return;
-  if (e.target.matches?.('input, select, textarea') ) return;
   e.preventDefault();
   if (act === 'mute') { sound.muted = !sound.muted; toast(sound.muted ? 'Sound off' : 'Sound on'); return; }
   if (state === 'menu') { if (act === 'enter' || act === 'hard') startGame('marathon'); return; }
@@ -416,6 +429,11 @@ addEventListener('keydown', (e) => {
 });
 
 addEventListener('keyup', (e) => {
+  if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && shiftTap) {
+    shiftTap = false;
+    if (state === 'play' && game && !celebrate && !document.querySelector('dialog[open]')) game.holdPiece();
+    return;
+  }
   const act = KEYMAP[e.code];
   if (!act || !game) return;
   input.held.delete(act);

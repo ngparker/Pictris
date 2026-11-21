@@ -34,6 +34,7 @@ Standard guideline layout (same as most modern block-stacking games):
 | M | Mute |
 | V | View photos so far (paused / game over) |
 | R / Enter | Restart (paused / game over) |
+| Shift+L | Demo: count a line as cleared, to show the photo steps and level-up |
 | Numpad | 4/6 move, 2 soft, 8 hard, 1/5/9 CW, 3/7 CCW, 0 hold |
 
 Touch: drag sideways to move, tap to rotate, drag down to soft drop, flick down to hard drop, flick up to hold.

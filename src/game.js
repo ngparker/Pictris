@@ -359,6 +359,19 @@ export class Game {
     this.emit('clear', { lines: n, tspin, b2b, combo: this.combo, points: pts });
   }
 
+  /**
+   * Demo helper: count one line as cleared without touching the board, so the photo progression
+   * and level-up can be shown on demand. Emits the same events as a real single.
+   */
+  cheatLine() {
+    if (this.over) return;
+    const before = this.level;
+    this.lines += 1;
+    this.level = this.startLevel + Math.floor(this.lines / LINES_PER_LEVEL);
+    this.emit('clear', { lines: 1, tspin: null, b2b: false, combo: 0, cheat: true });
+    if (this.level !== before) this.emit('levelup', { level: this.level });
+  }
+
   finishClear() {
     const { rows } = this.clearing;
     this.clearing = null;

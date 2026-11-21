@@ -220,3 +220,16 @@ test('shared album: link validation and page parsing', async () => {
     'https://x.github.io/Pictris/?album=https%3A%2F%2Fphotos.app.goo.gl%2FAbC');
   assert.equal(A.parseAlbumHtml('<html>nothing</html>').items.length, 0);
 });
+
+test('cheatLine counts a line, emits clear, and levels up every 10', () => {
+  const g = new Game({ seed: 21, startLevel: 3 });
+  const ev = [];
+  g.emit = (t, d) => ev.push([t, d && d.level]);
+  const before = g.board.slice();
+  for (let i = 0; i < 10; i++) g.cheatLine();
+  assert.equal(g.lines, 10);
+  assert.equal(g.level, 4);
+  assert.deepEqual(g.board, before, 'board untouched');
+  assert.equal(ev.filter(([t]) => t === 'clear').length, 10);
+  assert.deepEqual(ev.filter(([t]) => t === 'levelup'), [['levelup', 4]]);
+});
