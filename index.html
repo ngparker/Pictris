@@ -171,11 +171,19 @@
     <p id="albumEmpty" class="hint" hidden>No photos yet. Add some from the menu and they will collect here as you level up.</p>
     <figure id="albumFig">
       <button type="button" id="albumPrev" aria-label="Previous photo">‹</button>
-      <img id="albumImg" alt="">
+      <img id="albumImg" alt="" title="Tap to view full page">
       <button type="button" id="albumNext" aria-label="Next photo">›</button>
     </figure>
     <p id="albumCap" class="album-cap"></p>
     <div id="albumStrip" class="strip"></div>
+  </dialog>
+
+  <dialog id="viewer" class="viewer" aria-label="Photo">
+    <img id="viewerImg" alt="">
+    <button type="button" id="viewerPrev" class="vnav prev" aria-label="Previous photo">‹</button>
+    <button type="button" id="viewerNext" class="vnav next" aria-label="Next photo">›</button>
+    <button type="button" id="viewerClose" class="vclose" aria-label="Close">✕</button>
+    <p id="viewerCap" class="vcap"></p>
   </dialog>
 
   <dialog id="helpDlg" class="panel">

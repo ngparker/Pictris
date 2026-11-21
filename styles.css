@@ -52,6 +52,18 @@ body.celebrate #hud { opacity: .12; }
 .album figure { margin: 0; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; }
 .album figure img { width: 100%; height: min(62dvh, 640px); object-fit: contain; border-radius: 10px; background: rgba(0,0,0,.35); }
 .album figure button { font-size: 22px; padding: 10px 12px; }
+.album figure img { cursor: zoom-in; }
+dialog.viewer { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0;
+  background: #000; color: var(--fg); overflow: hidden; }
+dialog.viewer::backdrop { background: #000; }
+.viewer img { width: 100%; height: 100%; object-fit: contain; display: block; cursor: zoom-out; }
+.viewer .vnav, .viewer .vclose { position: absolute; background: rgba(0,0,0,.45); border-color: rgba(255,255,255,.18); }
+.viewer .vnav { top: 50%; transform: translateY(-50%); font-size: 26px; padding: 12px 16px; }
+.viewer .prev { left: max(12px, env(safe-area-inset-left)); }
+.viewer .next { right: max(12px, env(safe-area-inset-right)); }
+.viewer .vclose { top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); padding: 6px 12px; }
+.viewer .vcap { position: absolute; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); margin: 0;
+  padding: 4px 12px; border-radius: 999px; background: rgba(0,0,0,.5); color: var(--muted); font-size: 13px; letter-spacing: .06em; white-space: nowrap; }
 .album-cap { text-align: center; color: var(--muted); font-size: 13px; letter-spacing: .06em; margin: 8px 0; }
 .strip { display: flex; gap: 6px; overflow-x: auto; padding: 4px 2px; justify-content: safe center; }
 .strip button { padding: 0; border-radius: 8px; overflow: hidden; flex: 0 0 auto; opacity: .55; border-width: 2px; }

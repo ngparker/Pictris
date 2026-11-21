@@ -25,6 +25,7 @@ uniform vec2 uF0, uF1;
 uniform int uMode;          // 0 focus, 1 blobs, 2 living
 uniform float uFocus, uSweep, uZoom, uAspect, uFill;
 uniform sampler2D uField;   // blobs: summed metaball field (low-res)
+uniform vec4 uImp[4];       // blobs: ripples (x, y in photo uv, age s, strength)
 uniform vec2 uPar;
 vec2 cover(vec2 uv, vec2 s){ return (uv-0.5)*s+0.5; }
 
@@ -78,6 +79,20 @@ void main(){
     const float thr = 0.42;
     vec2 tx = 1. / vec2(textureSize(uField, 0));
     float f = texture(uField, vUv).r + uFill;
+    // Ripples from landing pieces: rings travel outward and fade, bending the photo as they pass.
+    vec2 wob = vec2(0.);
+    float crest = 0.;
+    for (int i = 0; i < 4; i++) {
+      vec4 im = uImp[i];
+      if (im.w <= 0.) continue;
+      vec2 dv = (uv - im.xy) * vec2(uAspect, 1.);
+      float dist = length(dv);
+      float front = im.z * 0.45;
+      float env = exp(-pow((dist - front) / 0.07, 2.)) * exp(-im.z * 1.8) * im.w;
+      float wave = sin((dist - front) * 70.) * env;
+      wob += (dist > 1e-4 ? dv / dist : vec2(0.)) * wave * 0.0045 / vec2(uAspect, 1.);
+      crest += max(wave, 0.);
+    }
     vec2 g = vec2(texture(uField, vUv + vec2(tx.x, 0.)).r - texture(uField, vUv - vec2(tx.x, 0.)).r,
                   texture(uField, vUv + vec2(0., tx.y)).r - texture(uField, vUv - vec2(0., tx.y)).r);
     float gl = length(g);
@@ -87,7 +102,9 @@ void main(){
     float edge = 1. - smoothstep(thr, thr + 0.30, f);      // 1 at the edge, 0 deep inside the drop
     float tilt = edge * edge * mask;
     float k = 0.022 * tilt;
-    vec3 ph = vec3(sharpAt(uv + inUv * k * 1.15).r, sharpAt(uv + inUv * k).g, sharpAt(uv + inUv * k * 0.85).b);
+    vec2 suv = uv + wob;
+    vec3 ph = vec3(sharpAt(suv + inUv * k * 1.15).r, sharpAt(suv + inUv * k).g, sharpAt(suv + inUv * k * 0.85).b);
+    ph *= 1. + 0.06 * crest;
     ph *= 1. + 0.12 * tilt;                                 // a little fresnel brightening at the rim
     float facing = max(dot(inward, normalize(vec2(0.75, -1.))), 0.);  // edge facing the top-left light
     float spec = pow(facing, 3.) * smoothstep(0.55, 1.0, edge) * mask;
@@ -259,10 +276,20 @@ export class Renderer {
     this.field = null;
     this.par = [0, 0];
     this.sweep = -1;
+    this.impacts = []; // blobs: { x, y (px), t (ms), s }
   }
 
   /** Living: a light sweep across the photo (called on line clears). */
   pulse() { this.sweep = 0; }
+
+  /** Blobs: a piece landed at board cell (cx, cy); send a ripple through the water. */
+  splash(cx, cy, strength = 1) {
+    const L = this.layout;
+    if (!L) return;
+    const x = L.bx + (cx + 0.5) * L.cell, y = L.by + (cy - HIDDEN + 0.5) * L.cell;
+    this.impacts.push({ x, y, t: performance.now(), s: strength });
+    if (this.impacts.length > 4) this.impacts.shift();
+  }
 
   // ---------- blobs (the "mosaic" style) ----------
   // Soft metaballs are summed into a low-res field texture; the background shader shows the sharp
@@ -342,7 +369,11 @@ export class Renderer {
     const gl = this.gl, L = this.layout;
     this.ensureField(L);
     if (!this.blobs || this.blobs.W !== L.W || this.blobs.H !== L.H) this.buildBlobs(L);
-    this.blobsAdvance(Math.floor(progress * this.blobs.list.length + 1e-6), now);
+    // Ease in: the first lines bring only a few blobs, later lines bring progressively more,
+    // so the picture is not mostly there after the first few lines.
+    this.blobsAdvance(Math.floor(Math.pow(progress, 1.8) * this.blobs.list.length + 1e-6), now);
+    const minD = Math.min(L.W, L.H), maxD = Math.max(L.W, L.H);
+    const imps = reduceMotion ? [] : this.impacts.filter((im) => now - im.t < 2500);
     const d = this.blobData;
     let n = 0, o = 0;
     for (let k = 0; k < this.blobs.home && n < MAX_BLOBS; k++) {
@@ -355,8 +386,17 @@ export class Renderer {
       const arc = Math.sin(Math.min(1, t) * Math.PI) * b.R * 0.6;
       const breathe = reduceMotion ? 1 : 1 + 0.05 * Math.sin(now / 1100 + b.phase);
       const r = b.R * (0.65 + 0.35 * Math.min(1, t)) * breathe;
-      const x = b.sx + (b.x - b.sx) * e + (reduceMotion ? 0 : Math.sin(now / 2300 + b.phase) * b.R * 0.05);
-      const y = b.sy + (b.y - b.sy) * e - arc + (reduceMotion ? 0 : Math.cos(now / 2700 + b.phase) * b.R * 0.05);
+      let x = b.sx + (b.x - b.sx) * e + (reduceMotion ? 0 : Math.sin(now / 2300 + b.phase) * b.R * 0.05);
+      let y = b.sy + (b.y - b.sy) * e - arc + (reduceMotion ? 0 : Math.cos(now / 2700 + b.phase) * b.R * 0.05);
+      // Ripples push blobs outward as the ring passes, then let them settle back.
+      for (const im of imps) {
+        const age = now - im.t;
+        const dx = x - im.x, dy = y - im.y, dist = Math.hypot(dx, dy) || 1;
+        const front = age * maxD * 0.00045;
+        const env = Math.exp(-(((dist - front) / (minD * 0.1)) ** 2)) * Math.exp(-age / 650) * im.s;
+        const push = Math.sin((dist - front) / (minD * 0.05)) * env * minD * 0.018;
+        x += (dx / dist) * push; y += (dy / dist) * push;
+      }
       for (const [lx, ly] of [[0, 0], [1, 0], [0, 1], [0, 1], [1, 0], [1, 1]]) {
         d[o++] = x + (lx * 2 - 1) * r; d[o++] = y + (ly * 2 - 1) * r;
         d[o++] = lx; d[o++] = ly; d[o++] = 1;
@@ -546,6 +586,14 @@ export class Renderer {
     gl.uniform1f(U.uBlur, blur);
     gl.uniform1i(U.uMode, exp === 'mosaic' ? 1 : exp === 'living' ? 2 : 0);
     gl.uniform1f(U.uFill, (v.seal || 0) * 0.6);
+    const imp = new Float32Array(16);
+    if (exp === 'mosaic' && !s.reduceMotion) {
+      const nowMs = performance.now();
+      this.impacts.forEach((im, i) => {
+        imp.set([im.x / L.W, im.y / L.H, (nowMs - im.t) / 1000, im.s], i * 4); // screen uv, age s
+      });
+    }
+    gl.uniform4fv(U['uImp[0]'], imp);
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.field ? this.field.tex : null);
     gl.uniform1i(U.uField, 2);
     gl.uniform1f(U.uFocus, focus);

@@ -263,7 +263,10 @@ function endCelebration() {
 // ---------------- game flow ----------------
 function onEvent(type, d) {
   switch (type) {
-    case 'lock': sound.lock(d.hard); break;
+    case 'lock':
+      sound.lock(d.hard);
+      if (settings.experience === 'mosaic') renderer.splash(d.cx, d.cy, d.hard ? 1 : 0.6);
+      break;
     case 'move': if (settings.moveSounds) sound.move(); break;
     case 'rotate': if (settings.moveSounds) sound.rotate(); break;
     case 'hold': sound.hold(); break;
@@ -620,6 +623,36 @@ function albumShow(i) {
   const many = gameShown.length > 1;
   $('#albumPrev').style.visibility = $('#albumNext').style.visibility = many ? '' : 'hidden';
 }
+// Full-page view: tap the photo; tap again, Esc or ✕ to return. Arrows / swipe step through.
+const viewer = $('#viewer');
+function viewerShow() {
+  const g = gameShown[albumAt];
+  if (!g) return;
+  const img = $('#viewerImg');
+  img.referrerPolicy = 'no-referrer';
+  img.src = $('#albumImg').src;
+  $('#viewerCap').textContent = `${fmtDay(g.rec.date)} · level ${g.level}`;
+  const many = gameShown.length > 1;
+  $('#viewerPrev').hidden = $('#viewerNext').hidden = !many;
+}
+function viewerStep(d) { albumShow(albumAt + d); viewerShow(); }
+$('#albumImg').onclick = () => { viewerShow(); viewer.showModal(); };
+$('#viewerImg').onclick = () => viewer.close();
+$('#viewerClose').onclick = () => viewer.close();
+$('#viewerPrev').onclick = (e) => { e.stopPropagation(); viewerStep(-1); };
+$('#viewerNext').onclick = (e) => { e.stopPropagation(); viewerStep(1); };
+viewer.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft') { e.preventDefault(); viewerStep(-1); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); viewerStep(1); }
+});
+let swipeX = null;
+viewer.addEventListener('pointerdown', (e) => { swipeX = e.clientX; });
+viewer.addEventListener('pointerup', (e) => {
+  if (swipeX === null) return;
+  const dx = e.clientX - swipeX;
+  swipeX = null;
+  if (Math.abs(dx) > 50 && gameShown.length > 1) { viewerStep(dx < 0 ? 1 : -1); e.stopPropagation(); }
+});
 $('#albumPrev').onclick = () => albumShow(albumAt - 1);
 $('#albumNext').onclick = () => albumShow(albumAt + 1);
 $('#albumDlg').addEventListener('keydown', (e) => {
@@ -789,5 +822,5 @@ $('#gPick').onclick = async () => {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   // Test hook for automated checks.
-  window.__pictris = { get game() { return game; }, get photos() { return photos; }, startGame, refreshPhotos, P };
+  window.__pictris = { get game() { return game; }, get photos() { return photos; }, startGame, refreshPhotos, P, renderer };
 })();
