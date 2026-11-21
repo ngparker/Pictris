@@ -10,8 +10,8 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 
 // ---------------- settings ----------------
 const DEFAULTS = {
-  blockStyle: 'color', order: 'chrono', span: 15, background: true, dim: 0.5, blur: 3, tint: 0.15, v: 2,
-  boardOpacity: 0.72, captions: true, ghost: true, previews: 5, das: 167, arr: 33,
+  blockStyle: 'color', order: 'chrono', span: 10, background: true, dim: 0.2, blur: 1, tint: 0.15, v: 2,
+  boardOpacity: 0.9, captions: true, ghost: false, previews: 1, das: 183, arr: 33,
   reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, volume: 0.5, moveSounds: false,
   startLevel: 1, gClientId: '', celebrate: true, avoidRepeats: true, experience: 'focus', albumUrl: '', relay: '',
 };
