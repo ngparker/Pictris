@@ -5,7 +5,7 @@ A calm falling-block puzzle game that weaves in your family photos. Static site 
 ## How photos are used
 
 - **The photo is the reward:** each level starts with its photo heavily blurred and dimmed behind the board. Every line you clear brings it further into focus and makes the board more transparent, so it is nearly clear by the end of the level.
-- **Solid blocks:** pieces are opaque, so a stack that builds up hides the photo. Playing clean keeps the picture visible. (Alternatives in Settings: lens blocks that show the photo sharp, or a photo on every piece.)
+- **Solid blocks:** pieces are opaque, so a stack that builds up hides the photo. Playing clean keeps the picture visible. (Alternative in Settings: lens blocks that show the photo sharp.)
 - **Level-up moment:** the game pauses for about 2.5 s, the board fades, and the finished photo pulls into full focus and eases out to show the whole frame; then the next photo drifts in. Any key cuts it short. Can be turned off.
 - **Timeline:** photos are sorted by date taken (EXIF → filename like `IMG_20140612_…` → file date; editable per photo) and split into 15 equal eras (configurable). Level 1 draws from the oldest era, level 15+ from the newest.
 - **Different every game:** with more photos than levels, each level picks at random within its era, never repeating within a game and preferring photos not shown in earlier games (history is kept in localStorage; least-recently-shown wins once all have been seen).
@@ -87,7 +87,7 @@ No build step, no dependencies.
 
 ## Tech
 
-- **WebGL2** renderer (`src/renderer.js`): blurred photo backdrop via mipmapped multi-tap sampling, crossfades between two photo textures, batched rounded/bevelled blocks with screen-space photo sampling, a texture array for per-piece photos.
+- **WebGL2** renderer (`src/renderer.js`): blurred photo backdrop via mipmapped multi-tap sampling, crossfades between two photo textures, batched rounded/bevelled blocks with screen-space photo sampling.
 - **Pure logic** (`src/game.js`): no DOM, deterministic with a seed, unit-tested.
 - **IndexedDB** photo library with a small EXIF reader (`src/photos.js`).
 - **Web Audio** synthesized, pentatonic, quiet sounds (`src/audio.js`). Move/rotate clicks are off by default.

@@ -57,13 +57,6 @@ const T_CORNERS = [[0, 0], [2, 0], [2, 2], [0, 2]];
 // Indices into T_CORNERS for the two corners the T "points" at, per rotation.
 const T_FRONT = [[0, 1], [1, 2], [2, 3], [3, 0]];
 
-/** Bounding extent of a set of cells: {x, y, w, h}. */
-export function extent(cells) {
-  let x0 = 9, y0 = 9, x1 = -1, y1 = -1;
-  for (const [x, y] of cells) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
-  return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
-}
-
 export function msPerRow(level) {
   const L = Math.min(Math.max(level, 1), 20);
   return Math.pow(0.8 - (L - 1) * 0.007, L - 1) * 1000;
@@ -88,22 +81,14 @@ export class Game {
    * @param {number} [o.seed]
    * @param {(type:string, data?:object)=>void} [o.onEvent]
    */
-  /**
-   * @param {(type:string)=>number} [o.tagger] assigns an opaque tag (e.g. photo id) to each new piece; -1 = none
-   */
-  constructor({ mode = 'marathon', startLevel = 1, seed = Date.now(), onEvent = () => {}, tagger = () => -1 } = {}) {
+  constructor({ mode = 'marathon', startLevel = 1, seed = Date.now(), onEvent = () => {} } = {}) {
     this.mode = mode;
     this.startLevel = startLevel;
     this.rand = mulberry32(seed);
     this.emit = onEvent;
-    this.tagger = tagger;
     this.board = new Uint8Array(ROWS * COLS); // 0 empty, else TYPES index + 1
-    this.tags = new Int32Array(ROWS * COLS).fill(-1); // tag of the piece that filled each cell
-    this.ext = new Uint8Array(ROWS * COLS); // cell position within its piece: ex | ey<<2 | (w-1)<<4 | (h-1)<<6
     this.queue = [];
-    this.queueTags = [];
     this.hold = null;
-    this.holdTag = -1;
     this.canHold = true;
     this.active = null;
     this.score = 0;
@@ -133,7 +118,6 @@ export class Game {
         [bag[i], bag[j]] = [bag[j], bag[i]];
       }
       this.queue.push(...bag);
-      this.queueTags.push(...bag.map((t) => this.tagger(t)));
     }
   }
 
@@ -152,17 +136,14 @@ export class Game {
 
   clearBoard() {
     this.board.fill(0);
-    this.tags.fill(-1);
-    this.ext.fill(0);
   }
 
-  spawn(type, tag = -1) {
+  spawn(type) {
     if (!type) {
       type = this.queue.shift();
-      tag = this.queueTags.shift();
       this.fillQueue();
     }
-    const p = { type, rot: 0, x: type === 'O' ? 4 : 3, y: HIDDEN - 2, tag };
+    const p = { type, rot: 0, x: type === 'O' ? 4 : 3, y: HIDDEN - 2 };
     if (!this.fits(p.type, p.rot, p.x, p.y)) {
       if (this.mode === 'zen') {
         this.clearBoard();
@@ -256,11 +237,10 @@ export class Game {
 
   holdPiece() {
     if (!this.playable || !this.canHold) return;
-    const { type: cur, tag: curTag } = this.active;
-    const swap = this.hold, swapTag = this.holdTag;
+    const cur = this.active.type;
+    const swap = this.hold;
     this.hold = cur;
-    this.holdTag = curTag;
-    this.spawn(swap || undefined, swapTag);
+    this.spawn(swap || undefined);
     this.canHold = false;
     this.emit('hold');
   }
@@ -321,14 +301,9 @@ export class Game {
     const a = this.active;
     const tspin = this.detectTSpin();
     let allHidden = true;
-    const cells = CELLS[a.type][a.rot];
-    const ex = extent(cells);
-    for (const [cx, cy] of cells) {
+    for (const [cx, cy] of CELLS[a.type][a.rot]) {
       const y = a.y + cy;
-      const i = y * COLS + a.x + cx;
-      this.board[i] = TYPES.indexOf(a.type) + 1;
-      this.tags[i] = a.tag;
-      this.ext[i] = (cx - ex.x) | ((cy - ex.y) << 2) | ((ex.w - 1) << 4) | ((ex.h - 1) << 6);
+      this.board[y * COLS + a.x + cx] = TYPES.indexOf(a.type) + 1;
       if (y >= HIDDEN) allHidden = false;
     }
     this.stats.pieces++;
@@ -388,12 +363,10 @@ export class Game {
     const { rows } = this.clearing;
     this.clearing = null;
     const off = rows.length;
-    for (const [arr, empty] of [[this.board, 0], [this.tags, -1], [this.ext, 0]]) {
-      const keep = [];
-      for (let y = 0; y < ROWS; y++) if (!rows.includes(y)) keep.push(arr.slice(y * COLS, (y + 1) * COLS));
-      arr.fill(empty);
-      keep.forEach((row, i) => arr.set(row, (i + off) * COLS));
-    }
+    const keep = [];
+    for (let y = 0; y < ROWS; y++) if (!rows.includes(y)) keep.push(this.board.slice(y * COLS, (y + 1) * COLS));
+    this.board.fill(0);
+    keep.forEach((row, i) => this.board.set(row, (i + off) * COLS));
 
     const before = this.level;
     this.lines += rows.length;

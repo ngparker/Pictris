@@ -162,28 +162,6 @@ test('photo timeline: levels map oldest→newest and grid labels agree', async (
   }
 });
 
-test('piece tags follow queue, hold, lock and line clears', () => {
-  let n = 100;
-  const g = new Game({ seed: 13, tagger: () => n++ });
-  const firstTag = g.active.tag;
-  const nextTag = g.queueTags[0];
-  assert.equal(g.queue.length, g.queueTags.length);
-  g.holdPiece();
-  assert.equal(g.holdTag, firstTag);
-  assert.equal(g.active.tag, nextTag);
-  // lock an I piece on top of a nearly-full row; the surviving row above should keep its tags after the clear
-  g.clearBoard();
-  fill(g, ROWS - 1, [0, 1, 2, 3]);
-  g.board[(ROWS - 2) * COLS + 9] = 1; g.tags[(ROWS - 2) * COLS + 9] = 7;
-  g.active = { type: 'I', rot: 0, x: 0, y: 0, tag: 42 };
-  g.hardDrop();
-  assert.equal(g.tags[(ROWS - 1) * COLS + 0], 42);
-  assert.equal(g.ext[(ROWS - 1) * COLS + 3], 3 | (0 << 2) | (3 << 4) | (0 << 6));
-  g.tick(CLEAR_DELAY + 1);
-  assert.equal(g.tags[(ROWS - 1) * COLS + 9], 7, 'row shifted down with its tag');
-  assert.equal(g.tags[(ROWS - 1) * COLS + 0], -1);
-});
-
 test('photo picker: random within era per game, avoids used and recently seen photos', async () => {
   const { photoForLevel } = await import('../src/photos.js');
   const photos = Array.from({ length: 150 }, (_, i) => ({ id: 'p' + i, date: i }));

@@ -1,5 +1,5 @@
 import { Game, LINES_PER_LEVEL } from './game.js';
-import { Renderer, PIECE_LAYERS } from './renderer.js';
+import { Renderer } from './renderer.js';
 import { Sound } from './audio.js';
 import * as P from './photos.js';
 import * as G from './gphotos.js';
@@ -11,7 +11,7 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 // ---------------- settings ----------------
 const DEFAULTS = {
   blockStyle: 'color', order: 'chrono', span: 15, background: true, dim: 0.5, blur: 3, tint: 0.15, v: 2,
-  boardOpacity: 0.72, captions: true, ghost: true, previews: 5, das: 167, arr: 33, clearText: true,
+  boardOpacity: 0.72, captions: true, ghost: true, previews: 5, das: 167, arr: 33,
   reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, volume: 0.5, moveSounds: false,
   startLevel: 1, gClientId: '', celebrate: true, avoidRepeats: true, albumUrl: '', relay: '',
 };
@@ -21,6 +21,7 @@ let settings = load('pictris.settings', DEFAULTS);
 let best = load('pictris.best', { marathon: 0, zen: 0 });
 let seen = load('pictris.seen', {}); // photo id -> last time it was the level photo
 if (settings.blockStyle === 'photo') settings.blockStyle = 'reveal';
+if (settings.blockStyle === 'pieces') settings.blockStyle = 'color';
 // v2: solid blocks, photo comes into focus as the level progresses.
 if (!(load('pictris.settings', {}).v >= 2)) Object.assign(settings, { blockStyle: 'color', blur: DEFAULTS.blur, dim: DEFAULTS.dim, v: 2 });
 
@@ -52,68 +53,6 @@ async function bitmapFor(rec) {
   // Evict without close(): an in-flight caller may still be about to upload it; GC reclaims it.
   if (bitmapCache.size > 16) bitmapCache.delete(bitmapCache.keys().next().value);
   return bmp;
-}
-
-// ---- photos on pieces: a pool of same-era photos, uploaded into texture-array layers ----
-const layerPhoto = new Array(PIECE_LAYERS).fill(null);
-const layerStamp = new Array(PIECE_LAYERS).fill(0);
-let layerClock = 0;
-let pool = []; // layer indices ready for new pieces
-let lastTag = -1;
-let poolGen = 0;
-
-function referencedLayers() {
-  const set = new Set(pool);
-  if (!game) return set;
-  for (const t of game.tags) if (t >= 0) set.add(t);
-  for (const t of game.queueTags) if (t >= 0) set.add(t);
-  if (game.holdTag >= 0) set.add(game.holdTag);
-  if (game.active?.tag >= 0) set.add(game.active.tag);
-  return set;
-}
-
-/** Up to 8 photos chronologically around the era photo for this level. */
-function eraPhotos(level, mode) {
-  const center = photoForGame(level, mode);
-  if (!center) return [];
-  if (settings.order === 'shuffle') {
-    const at = photos.indexOf(center);
-    return Array.from({ length: Math.min(8, photos.length) }, (_, i) => photos[(at + i * 7) % photos.length]);
-  }
-  const idx = photos.indexOf(center);
-  const start = Math.max(0, Math.min(idx - 3, photos.length - 8));
-  return photos.slice(start, start + 8);
-}
-
-async function preparePool(level, mode) {
-  const gen = ++poolGen;
-  const recs = eraPhotos(level, mode);
-  const ready = [];
-  for (const rec of recs) {
-    let layer = layerPhoto.indexOf(rec.id);
-    if (layer < 0) {
-      const used = referencedLayers();
-      for (let i = 0; i < PIECE_LAYERS; i++) {
-        if (used.has(i) || ready.includes(i)) continue;
-        if (layer < 0 || layerStamp[i] < layerStamp[layer]) layer = i;
-      }
-      if (layer < 0) continue;
-      try {
-        renderer.setPieceLayer(layer, await bitmapFor(rec));
-        layerPhoto[layer] = rec.id;
-      } catch { continue; }
-    }
-    layerStamp[layer] = ++layerClock;
-    ready.push(layer);
-  }
-  if (gen === poolGen && ready.length) pool = ready;
-}
-
-function pieceTag() {
-  if (!pool.length) return -1;
-  let t = pool[Math.floor(Math.random() * pool.length)];
-  if (t === lastTag && pool.length > 1) t = pool[(pool.indexOf(t) + 1) % pool.length];
-  return (lastTag = t);
 }
 
 async function showPhoto(rec, instant = false) {
@@ -266,7 +205,6 @@ function placeHud() {
 
 let toastTimer;
 function toast(text) {
-  if (!settings.clearText) return;
   const t = $('#toast');
   t.textContent = text;
   t.classList.add('show');
@@ -318,19 +256,10 @@ function onEvent(type, d) {
     case 'hold': sound.hold(); break;
     case 'clear': {
       if (d.lines) sound.clear(d.lines, d.combo);
-      const names = ['', 'Single', 'Double', 'Triple', 'Quad'];
-      let label = '';
-      if (d.tspin) label = `${d.tspin === 'mini' ? 'Mini ' : ''}T-Spin${d.lines ? ' ' + names[d.lines] : ''}`;
-      else if (d.lines === 4) label = 'Quad';
-      if (label && d.b2b) label = 'Back-to-back ' + label;
-      if (d.combo >= 2) label = (label ? label + ' · ' : '') + `Combo ×${d.combo}`;
-      if (label) toast(label);
       break;
     }
-    case 'perfect': toast('Perfect clear'); break;
     case 'levelup': {
       sound.levelUp();
-      preparePool(d.level);
       if (settings.celebrate && currentPhotoId !== null) {
         celebrate = { t: 0, level: d.level, switched: false };
         document.body.classList.add('celebrate');
@@ -351,13 +280,11 @@ async function startGame(mode = game?.mode || 'marathon') {
   starting = true;
   seed = (Math.random() * 2 ** 31) | 0;
   game = null;
-  pool = [];
   picks = new Map();
   gameShown = [];
   endCelebration();
-  await preparePool(settings.startLevel, mode).catch(() => {});
   starting = false;
-  game = new Game({ mode, startLevel: settings.startLevel, seed, onEvent, tagger: pieceTag });
+  game = new Game({ mode, startLevel: settings.startLevel, seed, onEvent });
   lastHud = '';
   state = 'play';
   paused = false;
@@ -592,7 +519,6 @@ form.addEventListener('input', (e) => {
   if ((el.name === 'order' || el.name === 'span') && game) {
     for (const k of [...picks.keys()]) if (k >= game.level) picks.delete(k);
     showLevelPhoto(game.level);
-    preparePool(game.level);
   }
 });
 $('#resetSettings').onclick = () => {
@@ -724,8 +650,6 @@ $('#clearAll').onclick = async () => {
   if (!confirm(`Remove all ${localPhotos.length} uploaded photos from this browser?`)) return;
   await P.clearPhotos();
   bitmapCache.clear();
-  layerPhoto.fill(null);
-  pool = [];
   seen = {};
   save('pictris.seen', seen);
   await refreshPhotos(); renderGrid();
