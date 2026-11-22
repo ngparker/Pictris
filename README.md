@@ -56,7 +56,7 @@ Photos → three ways, which can be combined:
 **1. Google Photos shared album link (shareable).** In Google Photos: album → Share → Create link. Paste it under *Google Photos shared album* → *Use album*. Photos load from Google as you play (nothing is copied). *Copy link to game + album* gives a link like
 
 ```
-https://<you>.github.io/Pictris/?album=https%3A%2F%2Fphotos.app.goo.gl%2F…
+https://pictris.parkerly.com/#album=https%3A%2F%2Fphotos.app.goo.gl%2F…
 ```
 
 Whoever opens it plays with that album, without touching their own photo library or settings.
@@ -88,6 +88,8 @@ npm test                       # game-logic + photo-timeline tests (Node ≥ 20)
 No build step, no dependencies.
 
 ## Hosting
+
+Live at **https://pictris.parkerly.com/** (GitHub Pages with a custom domain: a `pictris` CNAME to `ngparker.github.io` at the parkerly.com DNS host, Squarespace; the domain is verified in GitHub). Its own origin keeps the photo library separate from other `ngparker.github.io` sites.
 
 `.github/workflows/pages.yml` runs the tests and deploys to GitHub Pages on every push. One-time: repo *Settings → Pages → Build and deployment → Source: GitHub Actions*. The service worker (`sw.js`) makes the game work offline after first load (uploaded photos only) and installable as an app; after a deploy, the new version shows on the second visit.
 
