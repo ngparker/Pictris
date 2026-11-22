@@ -50,8 +50,11 @@ float depth(vec2 uv){
   return clamp(d * 0.8 + uv.y * 0.35, 0., 1.);
 }
 vec3 sharpAt(vec2 uv){
-  vec3 a = uH0>0.5 ? photo0(uv) : vec3(0.07,0.08,0.11);
-  vec3 b = uH1>0.5 ? photo1(uv) : vec3(0.07,0.08,0.11);
+  vec3 a = vec3(0.07,0.08,0.11);
+  if (uH0 > 0.5) a = photo0(uv);
+  if (uMix <= 0.) return a;
+  vec3 b = vec3(0.07,0.08,0.11);
+  if (uH1 > 0.5) b = photo1(uv);
   return mix(a,b,uMix);
 }
 // Dawn (cool, dim, muted) -> golden hour (warm, glowing) -> full daylight, by level progress p.
@@ -70,10 +73,10 @@ vec3 grade(vec3 c, vec2 uv, float p){
 }
 vec3 soft(sampler2D t, vec2 uv){
   vec3 c = vec3(0.);
-  for(int i=-2;i<=2;i++) for(int j=-2;j<=2;j++){
-    c += textureLod(t, uv + vec2(float(i),float(j))*0.006*uBlur, min(uBlur*2.5, 2.0 + uBlur)).rgb;
+  for(int i=-1;i<=1;i++) for(int j=-1;j<=1;j++){
+    c += textureLod(t, uv + vec2(float(i),float(j))*0.011*uBlur, min(uBlur*2.5, 2.5 + uBlur)).rgb;
   }
-  return c/25.;
+  return c/9.;
 }
 void main(){
   vec2 uv = vec2(vUv.x, 1.-vUv.y);
@@ -83,7 +86,7 @@ void main(){
   vec2 zuv = (uv-0.5)*0.97+0.5+drift;
   vec3 a = base, b = base;
   if (uH0 > 0.5) { vec2 p = frame0(zuv); a = mix(fillAt(uT0, zuv, uK0, p), soft(uT0, p), inPhoto(p)); }
-  if (uH1 > 0.5) { vec2 p = frame1(zuv); b = mix(fillAt(uT1, zuv, uK1, p), soft(uT1, p), inPhoto(p)); }
+  if (uH1 > 0.5 && uMix > 0.) { vec2 p = frame1(zuv); b = mix(fillAt(uT1, zuv, uK1, p), soft(uT1, p), inPhoto(p)); }
   vec3 c = mix(a,b,uMix);
   c *= 1.-uDim;
   vec2 luv = (uv-0.5)/uZoom + 0.5 + drift*0.6;
@@ -104,7 +107,10 @@ void main(){
     float edge = 1. - smoothstep(thr, thr + 0.30, f);      // 1 at the edge, 0 deep inside the drop
     float tilt = edge * edge * mask;
     float k = 0.022 * tilt;
-    vec3 ph = vec3(sharpAt(uv + inUv * k * 1.15).r, sharpAt(uv + inUv * k).g, sharpAt(uv + inUv * k * 0.85).b);
+    vec3 ph;
+    if (mask <= 0.) ph = c;
+    else if (tilt < 0.01) ph = sharpAt(uv);
+    else ph = vec3(sharpAt(uv + inUv * k * 1.15).r, sharpAt(uv + inUv * k).g, sharpAt(uv + inUv * k * 0.85).b);
     ph *= 1. + 0.12 * tilt;                                 // a little fresnel brightening at the rim
     float facing = max(dot(inward, normalize(vec2(0.75, -1.))), 0.);  // edge facing the top-left light
     float spec = pow(facing, 3.) * smoothstep(0.55, 1.0, edge) * mask;
@@ -130,7 +136,8 @@ void main(){
     vec2 e0 = smoothstep(vec2(0.), vec2(0.004), p0) * smoothstep(vec2(0.), vec2(0.004), 1.-p0);
     vec2 e1 = smoothstep(vec2(0.), vec2(0.004), p1) * smoothstep(vec2(0.), vec2(0.004), 1.-p1);
     float m0 = e0.x*e0.y*uH0, m1 = e1.x*e1.y*uH1;
-    vec3 sharp = mix(texture(uT0, p0).rgb, texture(uT1, p1).rgb, uMix);
+    vec3 sharp = texture(uT0, p0).rgb;
+    if (uMix > 0.) sharp = mix(sharp, texture(uT1, p1).rgb, uMix);
     if (uMode == 2) sharp = mix(grade(sharp, uv, 1.), sharp, gz);
     float m = mix(m0, m1, uMix);
     float band = exp(-pow((uv.x + uv.y*0.35 - (uShine*1.9 - 0.3))*5., 2.));
@@ -488,7 +495,7 @@ export class Renderer {
   }
 
   resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = Math.round(this.canvas.clientWidth * dpr), h = Math.round(this.canvas.clientHeight * dpr);
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w; this.canvas.height = h;

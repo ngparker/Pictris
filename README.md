@@ -45,6 +45,7 @@ DAS/ARR are adjustable in Settings.
 
 7-bag randomizer, SRS rotation with wall kicks, hold, 5-piece preview, ghost piece, 0.5 s lock delay with 15 move resets, T-spin / mini detection, back-to-back, combos, perfect-clear bonus, guideline gravity curve.
 
+- **Timing (Settings):** *Modern* gives 0.5 s to slide or rotate after landing (up to 15 resets), the next piece appears at once, and speed follows the guideline curve. *Classic* matches Tetris N-Blox (freetetris.org): 550 ms per row at level 1, 50 ms faster each level (floor 50 ms), 42 ms soft drop, 170/50 ms auto-repeat, a landed piece locks on its next fall step with no resets (soft drop locks at once), and a 95 ms pause before the next piece. Both use the 7-bag.
 - **Marathon:** speeds up every 10 lines; game over on top-out.
 - **Zen:** constant speed (your chosen start level), never ends — a full board quietly resets. Photos keep advancing every 10 lines and loop.
 

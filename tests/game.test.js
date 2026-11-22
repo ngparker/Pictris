@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Game, COLS, ROWS, HIDDEN, CELLS, TYPES, msPerRow, LOCK_DELAY, CLEAR_DELAY } from '../src/game.js';
+import { Game, COLS, ROWS, HIDDEN, CELLS, TYPES, msPerRow, LOCK_DELAY, CLEAR_DELAY, classicMsPerRow, CLASSIC } from '../src/game.js';
 
 const fill = (g, y, except = []) => {
   for (let x = 0; x < COLS; x++) if (!except.includes(x)) g.board[y * COLS + x] = 1;
@@ -251,4 +251,40 @@ test('serialize / restore resumes the exact same game', () => {
   assert.equal(b.score, a.score);
   assert.equal(Game.restore({ v: 2 }), null);
   assert.equal(Game.restore(null), null);
+});
+
+test('classic timing: N-Blox fall speeds, lock on next step without resets, pause before next piece', () => {
+  assert.equal(classicMsPerRow(1), 550);
+  assert.equal(classicMsPerRow(5), 350);
+  assert.equal(classicMsPerRow(10), 100);
+  assert.equal(classicMsPerRow(20), 50);
+  const g = new Game({ seed: 31, timing: 'classic' });
+  g.active.y += g.dropDistance();
+  // Sliding along the floor does not buy time: it still locks one fall step after landing.
+  g.tick(300); g.move(-1); g.tick(200);
+  assert.equal(g.stats.pieces, 0);
+  g.tick(60);
+  assert.equal(g.stats.pieces, 1, 'locked ~550 ms after landing');
+  assert.equal(g.active, null, 'next piece is not there yet');
+  g.tick(CLASSIC.ARE_MS - 10);
+  assert.equal(g.active, null);
+  g.tick(20);
+  assert.ok(g.active, 'next piece appears after the pause');
+  // Soft drop onto the stack locks immediately.
+  g.softDrop = true;
+  for (let i = 0; i < 60 && g.stats.pieces === 1; i++) g.tick(CLASSIC.SOFT_DROP_MS);
+  assert.equal(g.stats.pieces, 2);
+  // Timing survives save / restore.
+  const r = Game.restore(g.serialize());
+  assert.equal(r.timing, 'classic');
+});
+
+test('modern timing unchanged: 500 ms lock delay and immediate next piece', () => {
+  const g = new Game({ seed: 32 });
+  g.active.y += g.dropDistance();
+  g.tick(LOCK_DELAY - 10);
+  assert.equal(g.stats.pieces, 0);
+  g.tick(20);
+  assert.equal(g.stats.pieces, 1);
+  assert.ok(g.active);
 });

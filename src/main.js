@@ -1,4 +1,4 @@
-import { Game, LINES_PER_LEVEL } from './game.js';
+import { Game, LINES_PER_LEVEL, CLASSIC } from './game.js';
 import { Renderer } from './renderer.js';
 import { Sound } from './audio.js';
 import * as P from './photos.js';
@@ -14,7 +14,7 @@ const DEFAULTS = {
   blockStyle: 'color', order: 'chrono', span: 10, background: true, dim: 0.2, blur: 1, tint: 0.15, v: 3,
   boardOpacity: 0.9, captions: true, ghost: false, previews: 1, das: 183, arr: 33,
   reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, volume: 0.5, moveSounds: false,
-  startLevel: 1, gClientId: '', celebrate: true, avoidRepeats: true, experience: 'mosaic', mode: 'marathon', albumUrl: '', relay: '',
+  startLevel: 1, gClientId: '', celebrate: true, avoidRepeats: true, experience: 'mosaic', mode: 'marathon', timing: 'modern', albumUrl: '', relay: '',
 };
 const load = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return { ...d }; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
@@ -398,7 +398,7 @@ async function startGame(mode = game?.mode || 'marathon') {
   gameShown = [];
   endCelebration();
   starting = false;
-  game = new Game({ mode, startLevel: settings.startLevel, seed, onEvent });
+  game = new Game({ mode, startLevel: settings.startLevel, seed, onEvent, timing: settings.timing });
   clearSave();
   lastHud = '';
   state = 'play';
@@ -414,6 +414,7 @@ async function startGame(mode = game?.mode || 'marathon') {
 
 function endGame() {
   state = 'over';
+  overAt = performance.now();
   clearSave();
   endCelebration();
   sound.gameOver();
@@ -474,10 +475,12 @@ const input = {
   update(dt) {
     if (!game || !this.dir) return;
     this.das += dt;
-    if (this.das < settings.das) return;
-    if (settings.arr <= 0) { while (game.move(this.dir)); return; }
+    const classic = settings.timing === 'classic';
+    const das = classic ? CLASSIC.DAS_MS : settings.das, arr = classic ? CLASSIC.ARR_MS : settings.arr;
+    if (this.das < das) return;
+    if (arr <= 0) { while (game.move(this.dir)); return; }
     this.arr += dt;
-    while (this.arr >= settings.arr) { this.arr -= settings.arr; if (!game.move(this.dir)) { this.arr = 0; break; } }
+    while (this.arr >= arr) { this.arr -= arr; if (!game.move(this.dir)) { this.arr = 0; break; } }
   },
 };
 
@@ -591,6 +594,8 @@ canvas.addEventListener('pointercancel', () => { touch.id = null; if (game) game
 
 // ---------------- loop ----------------
 let last = performance.now();
+let lastRender = 0;
+let overAt = 0;
 function frame(now) {
   const dt = Math.min(100, now - last);
   last = now;
@@ -608,9 +613,15 @@ function frame(now) {
   } else focus = 0;
   if (state === 'menu') {
     menuTimer += dt;
-    if (menuTimer > 14000) { menuTimer = 0; menuSlide(); }
+    if (menuTimer > 20000) { menuTimer = 0; menuSlide(); }
   }
-  renderer.render({ game: state === 'menu' ? null : game, time: now, dt, settings,
+  // Nothing moves quickly on the menu, while paused or after game over: redraw ~10 times a second
+  // instead of every frame (the photo drift is very slow), except during cross-fades and animations.
+  const idle = (state === 'menu' || state === 'pause' || (state === 'over' && now - overAt > 2200)) && !renderer.fading && !celebrate;
+  if (idle && now - lastRender < 100) { requestAnimationFrame(frame); return; }
+  const rdt = Math.min(200, now - (lastRender || now - dt));
+  lastRender = now;
+  renderer.render({ game: state === 'menu' ? null : game, time: now, dt: rdt, settings,
     focus, reveal: revealAmount(), seal: celebrate && !celebrate.switched ? ease01((celebrate.t + 700) / 700) : 0, shine: celebrate ? celebrate.t / (CEL.in + CEL.hold) : 0 });
   requestAnimationFrame(frame);
 }
@@ -669,6 +680,7 @@ function fillSettings() {
 function showRelevantSettings() {
   for (const el of form.querySelectorAll('[data-for-exp]')) el.hidden = !el.dataset.forExp.split(' ').includes(settings.experience);
   for (const el of form.querySelectorAll('[data-for-block]')) el.hidden = el.dataset.forBlock !== settings.blockStyle;
+  for (const el of form.querySelectorAll('[data-for-timing]')) el.hidden = el.dataset.forTiming !== settings.timing;
 }
 form.addEventListener('input', (e) => {
   const el = e.target;
@@ -680,7 +692,8 @@ form.addEventListener('input', (e) => {
   sound.volume = settings.volume;
   save('pictris.settings', settings);
   if (el.name === 'experience') renderExp();
-  if (el.name === 'experience' || el.name === 'blockStyle') showRelevantSettings();
+  if (el.name === 'experience' || el.name === 'blockStyle' || el.name === 'timing') showRelevantSettings();
+  if (el.name === 'timing' && game) game.timing = settings.timing;
   if (el.name === 'captions') setCaption(photos.find((p) => p.id === currentPhotoId));
   if ((el.name === 'order' || el.name === 'span') && game) {
     for (const k of [...picks.keys()]) if (k >= game.level) picks.delete(k);

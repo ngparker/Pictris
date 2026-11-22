@@ -9,6 +9,14 @@ export const TYPES = ['I', 'J', 'L', 'O', 'S', 'T', 'Z'];
 export const LOCK_DELAY = 500;
 export const MAX_LOCK_RESETS = 15;
 export const CLEAR_DELAY = 220;
+
+// "Classic" timing, measured from Tetris N-Blox (freetetris.org): linear fall speed, a fixed fast
+// soft drop, no lock delay (a landed piece locks on the next fall step, and moving doesn't buy time),
+// and a short pause before the next piece appears.
+export const CLASSIC = { SOFT_DROP_MS: 42, ARE_MS: 95, DAS_MS: 170, ARR_MS: 50 };
+export function classicMsPerRow(level) {
+  return Math.max(50, 600 - 50 * Math.max(1, level));
+}
 export const LINES_PER_LEVEL = 10;
 
 const SHAPES = {
@@ -72,7 +80,7 @@ function mulberry32Next(state) {
 }
 
 // Fields that fully describe a game in progress (see Game.serialize / Game.restore).
-const SAVED = ['mode', 'startLevel', 'rng', 'queue', 'hold', 'canHold', 'active', 'score', 'lines', 'level', 'combo',
+const SAVED = ['mode', 'startLevel', 'timing', 'are', 'rng', 'queue', 'hold', 'canHold', 'active', 'score', 'lines', 'level', 'combo',
   'b2b', 'over', 'clearing', 'gravityAcc', 'lockTimer', 'lockResets', 'lowestY', 'lastRotate', 'lastKick', 'stats'];
 
 export class Game {
@@ -83,9 +91,12 @@ export class Game {
    * @param {number} [o.seed]
    * @param {(type:string, data?:object)=>void} [o.onEvent]
    */
-  constructor({ mode = 'marathon', startLevel = 1, seed = Date.now(), onEvent = () => {} } = {}) {
+  /** @param {'modern'|'classic'} [o.timing] */
+  constructor({ mode = 'marathon', startLevel = 1, seed = Date.now(), onEvent = () => {}, timing = 'modern' } = {}) {
     this.mode = mode;
     this.startLevel = startLevel;
+    this.timing = timing;
+    this.are = 0; // classic: time left before the next piece appears
     this.rng = seed >>> 0;
     this.emit = onEvent;
     this.board = new Uint8Array(ROWS * COLS); // 0 empty, else TYPES index + 1
@@ -198,7 +209,22 @@ export class Game {
     return !this.over && !this.clearing && !!this.active;
   }
 
+  get classic() { return this.timing === 'classic'; }
+
+  /** Normal fall time per row for the current level. */
+  gravityMs() {
+    const level = this.mode === 'zen' ? this.startLevel : this.level;
+    return this.classic ? classicMsPerRow(level) : msPerRow(level);
+  }
+
+  /** After a lock or line clear: next piece now (modern) or after a short pause (classic). */
+  next() {
+    if (this.classic) { this.active = null; this.are = CLASSIC.ARE_MS; }
+    else this.spawn();
+  }
+
   afterMove() {
+    if (this.classic) return; // no lock-delay resets in classic timing
     const a = this.active;
     if (a.y > this.lowestY) {
       this.lowestY = a.y;
@@ -278,11 +304,16 @@ export class Game {
       if (this.clearing.t <= 0) this.finishClear();
       return;
     }
+    if (this.are > 0) {
+      this.are -= dt;
+      if (this.are <= 0) { this.are = 0; this.spawn(); }
+      return;
+    }
     if (!this.active) return;
     const a = this.active;
-    const level = this.mode === 'zen' ? this.startLevel : this.level;
-    let g = msPerRow(level);
-    if (this.softDrop) g = Math.min(g, Math.max(g / 20, 25));
+    const normal = this.gravityMs();
+    let g = normal;
+    if (this.softDrop) g = this.classic ? Math.min(g, CLASSIC.SOFT_DROP_MS) : Math.min(g, Math.max(g / 20, 25));
     this.gravityAcc += dt;
     let steps = 0;
     while (this.gravityAcc >= g && steps < ROWS) {
@@ -304,7 +335,10 @@ export class Game {
     }
     if (!this.fits(a.type, a.rot, a.x, a.y + 1)) {
       this.lockTimer += dt;
-      if (this.lockTimer >= LOCK_DELAY || this.lockResets >= MAX_LOCK_RESETS) this.lock(false);
+      if (this.classic) {
+        // Locks on what would have been the next fall step; holding soft drop locks at once.
+        if (this.softDrop || this.lockTimer >= normal) this.lock(false);
+      } else if (this.lockTimer >= LOCK_DELAY || this.lockResets >= MAX_LOCK_RESETS) this.lock(false);
     } else {
       this.lockTimer = 0;
     }
@@ -357,7 +391,7 @@ export class Game {
         return this.gameOver('lockout');
       }
     }
-    this.spawn();
+    this.next();
   }
 
   score_(n, tspin) {
@@ -415,6 +449,6 @@ export class Game {
       this.emit('perfect');
     }
     if (this.level !== before) this.emit('levelup', { level: this.level });
-    this.spawn();
+    this.next();
   }
 }
