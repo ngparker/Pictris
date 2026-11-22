@@ -26,7 +26,23 @@ uniform int uMode;          // 0 focus, 1 blobs, 2 living
 uniform float uFocus, uSweep, uZoom, uAspect, uFill;
 uniform sampler2D uField;   // blobs: summed metaball field (low-res)
 uniform vec2 uPar;
-vec2 cover(vec2 uv, vec2 s){ return (uv-0.5)*s+0.5; }
+// Framing: screen uv -> photo uv. uC = visible share of the photo per axis (can exceed 1, leaving bands),
+// uO = centre of the view in the photo (moved toward faces), uK = full-cover scale (for the soft fill).
+uniform vec2 uO0, uO1, uK0, uK1;
+vec2 frame0(vec2 uv){ return (uv-0.5)*uC0 + uO0; }
+vec2 frame1(vec2 uv){ return (uv-0.5)*uC1 + uO1; }
+float inPhoto(vec2 p){
+  vec2 e = smoothstep(vec2(-0.02), vec2(0.02), p) * smoothstep(vec2(-0.02), vec2(0.02), 1.-p);
+  return e.x*e.y;
+}
+// Where the photo doesn't reach: its own edge colours, stretched out and very softly blurred.
+vec3 fillAt(sampler2D t, vec2 uv, vec2 k, vec2 p){
+  vec3 a = textureLod(t, clamp(p, 0.003, 0.997), 5.5).rgb;
+  vec3 b = textureLod(t, (uv-0.5)*k + 0.5, 6.5).rgb;
+  return mix(a, b, 0.45) * 0.62;
+}
+vec3 photo0(vec2 uv){ vec2 p = frame0(uv); return mix(fillAt(uT0, uv, uK0, p), texture(uT0, p).rgb, inPhoto(p)); }
+vec3 photo1(vec2 uv){ vec2 p = frame1(uv); return mix(fillAt(uT1, uv, uK1, p), texture(uT1, p).rgb, inPhoto(p)); }
 
 // Living: a smooth pseudo-depth (centre and lower frame read as nearer) for gentle parallax.
 float depth(vec2 uv){
@@ -34,8 +50,8 @@ float depth(vec2 uv){
   return clamp(d * 0.8 + uv.y * 0.35, 0., 1.);
 }
 vec3 sharpAt(vec2 uv){
-  vec3 a = uH0>0.5 ? texture(uT0, cover(uv,uC0)).rgb : vec3(0.07,0.08,0.11);
-  vec3 b = uH1>0.5 ? texture(uT1, cover(uv,uC1)).rgb : vec3(0.07,0.08,0.11);
+  vec3 a = uH0>0.5 ? photo0(uv) : vec3(0.07,0.08,0.11);
+  vec3 b = uH1>0.5 ? photo1(uv) : vec3(0.07,0.08,0.11);
   return mix(a,b,uMix);
 }
 // Dawn (cool, dim, muted) -> golden hour (warm, glowing) -> full daylight, by level progress p.
@@ -65,8 +81,9 @@ void main(){
   // very slow drift so the scene feels alive but never busy
   vec2 drift = vec2(sin(uTime*0.021), cos(uTime*0.017))*0.006;
   vec2 zuv = (uv-0.5)*0.97+0.5+drift;
-  vec3 a = uH0>0.5 ? soft(uT0, cover(zuv,uC0)) : base;
-  vec3 b = uH1>0.5 ? soft(uT1, cover(zuv,uC1)) : base;
+  vec3 a = base, b = base;
+  if (uH0 > 0.5) { vec2 p = frame0(zuv); a = mix(fillAt(uT0, zuv, uK0, p), soft(uT0, p), inPhoto(p)); }
+  if (uH1 > 0.5) { vec2 p = frame1(zuv); b = mix(fillAt(uT1, zuv, uK1, p), soft(uT1, p), inPhoto(p)); }
   vec3 c = mix(a,b,uMix);
   c *= 1.-uDim;
   vec2 luv = (uv-0.5)/uZoom + 0.5 + drift*0.6;
@@ -108,7 +125,8 @@ void main(){
     float w = smoothstep(0., 0.3, uReveal);   // content: current look -> true photo
     float gz = smoothstep(0.3, 1., uReveal);  // geometry: cover -> whole frame, only once w is complete
     vec2 ruv = uMode == 2 ? mix(luv, uv, gz) : uv;
-    vec2 p0 = cover(ruv, mix(uC0, uF0, gz)), p1 = cover(ruv, mix(uC1, uF1, gz));
+    vec2 p0 = (ruv-0.5)*mix(uC0, uF0, gz) + mix(uO0, vec2(0.5), gz);
+    vec2 p1 = (ruv-0.5)*mix(uC1, uF1, gz) + mix(uO1, vec2(0.5), gz);
     vec2 e0 = smoothstep(vec2(0.), vec2(0.004), p0) * smoothstep(vec2(0.), vec2(0.004), 1.-p0);
     vec2 e1 = smoothstep(vec2(0.), vec2(0.004), p1) * smoothstep(vec2(0.), vec2(0.004), 1.-p1);
     float m0 = e0.x*e0.y*uH0, m1 = e1.x*e1.y*uH1;
@@ -139,9 +157,8 @@ precision highp float;
 in vec2 vLocal; in vec2 vSize; in vec4 vColor; in vec4 vParams;
 out vec4 o;
 uniform sampler2D uT0, uT1;
-uniform vec2 uC0, uC1, uRes;
+uniform vec2 uC0, uC1, uO0, uO1, uRes;
 uniform float uH0, uH1, uMix;
-vec2 cover(vec2 uv, vec2 s){ return (uv-0.5)*s+0.5; }
 void main(){
   int mode = int(vParams.x+0.5);
   float r = vParams.w;
@@ -166,8 +183,8 @@ void main(){
   }
   if (mode == 1) {
     vec2 suv = vec2(gl_FragCoord.x/uRes.x, 1.-gl_FragCoord.y/uRes.y);
-    vec3 a = uH0>0.5 ? texture(uT0, cover(suv,uC0)).rgb : col;
-    vec3 b = uH1>0.5 ? texture(uT1, cover(suv,uC1)).rgb : col;
+    vec3 a = uH0>0.5 ? texture(uT0, clamp((suv-0.5)*uC0 + uO0, 0., 1.)).rgb : col;
+    vec3 b = uH1>0.5 ? texture(uT1, clamp((suv-0.5)*uC1 + uO1, 0., 1.)).rgb : col;
     vec3 ph = mix(a,b,uMix);
     col = mix(ph, ph*col*1.6, vParams.z);
   }
@@ -203,6 +220,7 @@ function compile(gl, vs, fs) {
 const FLOATS = 14; // per vertex
 const MAX_QUADS = 1500;
 const MAX_BLOBS = 600;
+const MAX_CROP = 0.15; // at most this share of a photo's width or height is cut off
 
 const BLOB_VS = `#version 300 es
 in vec2 aPos; in vec2 aLocal; in float aK;
@@ -398,7 +416,7 @@ export class Renderer {
   }
 
   /** Crossfade to a new ImageBitmap (or null for no photo). */
-  setPhoto(bitmap, instant = false) {
+  setPhoto(bitmap, instant = false, meta = {}) {
     const gl = this.gl;
     if (this.fading) this.finishFade();
     const next = 1 - this.cur;
@@ -407,7 +425,7 @@ export class Renderer {
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
       gl.generateMipmap(gl.TEXTURE_2D);
-      this.slots[next] = { w: bitmap.width, h: bitmap.height };
+      this.slots[next] = { w: bitmap.width, h: bitmap.height, id: meta.id, face: meta.face || null };
     } else {
       this.slots[next] = null;
     }
@@ -478,6 +496,35 @@ export class Renderer {
     return I > A ? [A / I, 1] : [1, I / A];
   }
 
+  /**
+   * How the photo sits on screen: { s: visible share per axis, o: view centre in photo uv }.
+   * Never crops more than MAX_CROP of either dimension (bands beyond the photo get a soft fill),
+   * centres on detected faces, and zooms out further if that is what it takes to keep them in view.
+   */
+  frame(slot) {
+    const sl = this.slots[slot];
+    if (!sl) return { s: [1, 1], o: [0.5, 0.5] };
+    const c = this.cover(slot);
+    const minC = Math.min(c[0], c[1]);
+    let k = Math.max(1, (1 - MAX_CROP) / minC);
+    const f = sl.face;
+    if (f) k = Math.max(k, (f.w + 0.12) / c[0], (f.h + 0.16) / c[1]);
+    k = Math.min(k, 1 / minC); // never smaller than the whole photo
+    const s = [c[0] * k, c[1] * k];
+    const want = f ? [f.x + f.w / 2, f.y + f.h * 0.45] : [0.5, 0.45];
+    const o = [0, 1].map((i) => (s[i] >= 1 ? 0.5 : Math.min(1 - s[i] / 2, Math.max(s[i] / 2, want[i]))));
+    // Ease toward the target so a late face detection pans gently instead of jumping.
+    if (!sl.o) sl.o = o;
+    const e = this.frameEase;
+    sl.o = [sl.o[0] + (o[0] - sl.o[0]) * e, sl.o[1] + (o[1] - sl.o[1]) * e];
+    return { s, o: sl.o };
+  }
+
+  /** A face box ({x,y,w,h} in 0..1, or null) became known for the photo with this id. */
+  setFace(id, face) {
+    for (const sl of this.slots) if (sl && sl.id === id) sl.face = face;
+  }
+
   quad(x, y, w, h, color, alpha, mode, flash = 0, tint = 0, radius = 0) {
     if (this.n >= MAX_QUADS) return;
     alpha *= this.fade;
@@ -535,7 +582,12 @@ export class Renderer {
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.tex[t1]);
     const U = this.bg.u;
     gl.uniform1i(U.uT0, 0); gl.uniform1i(U.uT1, 1);
-    gl.uniform2fv(U.uC0, this.cover(t0)); gl.uniform2fv(U.uC1, this.cover(t1));
+    this.frameEase = Math.min(1, v.dt / 700);
+    const F0 = this.frame(t0), F1 = this.frame(t1);
+    this.frames = [F0, F1];
+    gl.uniform2fv(U.uC0, F0.s); gl.uniform2fv(U.uC1, F1.s);
+    gl.uniform2fv(U.uO0, F0.o); gl.uniform2fv(U.uO1, F1.o);
+    gl.uniform2fv(U.uK0, this.cover(t0)); gl.uniform2fv(U.uK1, this.cover(t1));
     gl.uniform1f(U.uH0, s.background ? has0 : 0); gl.uniform1f(U.uH1, s.background ? has1 : 0);
     gl.uniform1f(U.uMix, this.fading ? this.mix : 0);
     // focus: 0 at the start of a level, 1 when it is nearly complete.
@@ -659,7 +711,9 @@ export class Renderer {
     const Q = this.q.u;
     gl.uniform2f(Q.uRes, L.W, L.H);
     gl.uniform1i(Q.uT0, 0); gl.uniform1i(Q.uT1, 1);
-    gl.uniform2fv(Q.uC0, this.cover(t0)); gl.uniform2fv(Q.uC1, this.cover(t1));
+    const [F0, F1] = this.frames || [this.frame(t0), this.frame(t1)];
+    gl.uniform2fv(Q.uC0, F0.s); gl.uniform2fv(Q.uC1, F1.s);
+    gl.uniform2fv(Q.uO0, F0.o); gl.uniform2fv(Q.uO1, F1.o);
     gl.uniform1f(Q.uH0, has0); gl.uniform1f(Q.uH1, has1);
     gl.uniform1f(Q.uMix, this.fading ? this.mix : 0);
     gl.bindVertexArray(this.qVao);

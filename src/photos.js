@@ -1,5 +1,7 @@
 // Photo library: resized copies stored in IndexedDB (localStorage is far too small for images).
 
+import { detectFace } from './faces.js';
+
 const DB_NAME = 'pictris';
 const STORE = 'photos';
 const MAX_SIDE = 2048;
@@ -146,12 +148,14 @@ export async function importImage(blob, { name = 'photo', knownDate = null, sour
   if (!date) { date = await exifDate(blob); dateSource = date && 'exif'; }
   if (!date) { date = filenameDate(name); dateSource = date && 'filename'; }
   if (!date) { date = lastModified || Date.now(); dateSource = 'file'; }
+  let face; // undefined = not analysed yet (retried later), null = no faces
+  try { face = await detectFace(bitmap); } catch { /* detection unavailable */ }
   const full = await resize(bitmap, MAX_SIDE, 0.88);
   const thumb = await resize(bitmap, THUMB_SIDE, 0.8);
   bitmap.close?.();
   const rec = {
     id: (crypto.randomUUID?.() || String(Math.random()).slice(2)),
-    name, date, dateSource, source,
+    name, date, dateSource, source, face,
     w: full.w, h: full.h,
     blob: full.blob, thumb: thumb.blob,
     added: Date.now(),

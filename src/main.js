@@ -4,6 +4,7 @@ import { Sound } from './audio.js';
 import * as P from './photos.js';
 import * as G from './gphotos.js';
 import * as A from './album.js';
+import { detectFace } from './faces.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -57,6 +58,36 @@ async function bitmapFor(rec) {
   return bmp;
 }
 
+// ---- faces: framing keeps people in view ----
+// Local photos store the result on their record; album photos keep it in localStorage.
+let remoteFaces = load('pictris.faces', {});
+const faceOf = (rec) => (rec.remote ? remoteFaces[rec.id] : rec.face) || null;
+const analysed = (rec) => (rec.remote ? rec.id in remoteFaces : rec.face !== undefined);
+const faceJobs = new Map();
+function ensureFace(rec, bmp) {
+  if (analysed(rec) || faceJobs.has(rec.id)) return faceJobs.get(rec.id);
+  const job = (async () => {
+    try {
+      const face = await detectFace(bmp || (await bitmapFor(rec)));
+      if (rec.remote) { remoteFaces[rec.id] = face; save('pictris.faces', remoteFaces); }
+      else { rec.face = face; await P.putPhoto(rec); }
+      renderer.setFace(rec.id, face);
+    } catch (e) { console.info('face detection unavailable:', e.message); }
+    finally { faceJobs.delete(rec.id); }
+  })();
+  faceJobs.set(rec.id, job);
+  return job;
+}
+/** Quietly analyse photos imported before face detection existed, one at a time, when idle. */
+async function analyseLibrary() {
+  for (const rec of photos) {
+    if (analysed(rec)) continue;
+    if (state === 'play') { setTimeout(analyseLibrary, 15000); return; } // don't compete with play
+    await ensureFace(rec);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
 async function showPhoto(rec, instant = false) {
   if (!rec) {
     if (currentPhotoId !== null) renderer.setPhoto(null, instant);
@@ -67,7 +98,8 @@ async function showPhoto(rec, instant = false) {
   currentPhotoId = rec.id;
   try {
     const bmp = await bitmapFor(rec);
-    if (currentPhotoId === rec.id) renderer.setPhoto(bmp, instant);
+    if (currentPhotoId === rec.id) renderer.setPhoto(bmp, instant, { id: rec.id, face: faceOf(rec) });
+    ensureFace(rec, bmp);
   } catch (e) {
     console.warn('photo decode failed', e);
   }
@@ -897,6 +929,7 @@ $('#gPick').onclick = async () => {
   placeHud();
   await refreshPhotos();
   menuSlide(true);
+  setTimeout(analyseLibrary, 2500);
   requestAnimationFrame(frame);
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
