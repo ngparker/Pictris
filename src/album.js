@@ -149,6 +149,14 @@ export async function remoteBlob(rec, px = 2048, relays = DEFAULT_RELAYS) {
   throw last || new Error('photo unavailable');
 }
 
+/** Share link with the album in the #fragment, which browsers never send to the web server. */
 export function shareLink(albumUrl, base = location.origin + location.pathname) {
-  return `${base}?album=${encodeURIComponent(albumUrl)}`;
+  return `${base}#album=${encodeURIComponent(albumUrl)}`;
+}
+
+/** Album link from a page URL: #album=… (current) or ?album=… (older links). */
+export function albumFromLocation(loc = location) {
+  const fromHash = new URLSearchParams(loc.hash.replace(/^#/, '')).get('album');
+  const fromQuery = new URLSearchParams(loc.search).get('album');
+  return normalizeAlbumUrl(fromHash || fromQuery || '');
 }

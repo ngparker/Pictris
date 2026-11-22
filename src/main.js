@@ -34,7 +34,10 @@ let renderer;
 try {
   renderer = new Renderer(canvas);
 } catch (e) {
-  document.body.innerHTML = `<p class="nojs">Pictris needs WebGL2, which this browser doesn't provide (${e.message}).</p>`;
+  const msg = document.createElement('p');
+  msg.className = 'nojs';
+  msg.textContent = `Pictris needs WebGL2, which this browser doesn't provide (${e.message}).`;
+  document.body.replaceChildren(msg);
   throw e;
 }
 const sound = new Sound();
@@ -138,7 +141,11 @@ const fmtDay = (ms) => new Date(ms).toLocaleDateString(undefined, { day: 'numeri
 
 // ---- album links ----
 // A link opened with ?album=… plays that album only, without touching this browser's own library.
-const sharedAlbumUrl = A.normalizeAlbumUrl(new URLSearchParams(location.search).get('album') || '');
+const sharedAlbumUrl = A.albumFromLocation();
+// An older ?album= link: move it into the #fragment so it isn't sent again on reloads.
+if (sharedAlbumUrl && new URLSearchParams(location.search).has('album')) {
+  try { history.replaceState(null, '', A.shareLink(sharedAlbumUrl)); } catch { /* ignore */ }
+}
 const activeAlbumUrl = () => sharedAlbumUrl || A.normalizeAlbumUrl(settings.albumUrl);
 const relays = () => A.relayList(settings.relay);
 let album = null; // { title, items, url }
@@ -869,10 +876,25 @@ async function renderGrid() {
     const lvl = settings.order === 'chrono' ? P.levelOfIndex(i, photos.length, span) : null;
     const d = new Date(p.date);
     const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    tile.innerHTML = `<img alt="" loading="lazy">${lvl ? `<span class="era">L${lvl}${lvl === span ? '+' : ''}</span>` : ''}
-      <button class="del" title="Remove" aria-label="Remove photo">✕</button>
-      <div class="meta"><input type="date" ${p.remote ? 'disabled title="From the shared album"' : `title="Date taken (${p.dateSource}) — change to reorder"`} value="${iso}"></div>`;
-    const timg = tile.querySelector('img');
+    const timg = document.createElement('img');
+    timg.alt = ''; timg.loading = 'lazy';
+    tile.append(timg);
+    if (lvl) {
+      const era = document.createElement('span');
+      era.className = 'era';
+      era.textContent = `L${lvl}${lvl === span ? '+' : ''}`;
+      tile.append(era);
+    }
+    const del = document.createElement('button');
+    del.className = 'del'; del.title = 'Remove'; del.setAttribute('aria-label', 'Remove photo'); del.textContent = '✕';
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const dateIn = document.createElement('input');
+    dateIn.type = 'date'; dateIn.value = iso;
+    if (p.remote) { dateIn.disabled = true; dateIn.title = 'From the shared album'; }
+    else dateIn.title = `Date taken (${p.dateSource}) — change to reorder`;
+    meta.append(dateIn);
+    tile.append(del, meta);
     timg.referrerPolicy = 'no-referrer';
     timg.src = url;
     tile.querySelector('.del').onclick = async () => { await P.deletePhoto(p.id); bitmapCache.delete(p.id); await refreshPhotos(); renderGrid(); };

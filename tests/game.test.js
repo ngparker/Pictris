@@ -217,7 +217,11 @@ test('shared album: link validation and page parsing', async () => {
   const recs = A.albumRecords(a);
   assert.equal(A.sized(recs[0], 240, true), 'https://lh3.googleusercontent.com/pw/AAA=w240-h240-c');
   assert.equal(A.shareLink('https://photos.app.goo.gl/AbC', 'https://x.github.io/Pictris/'),
-    'https://x.github.io/Pictris/?album=https%3A%2F%2Fphotos.app.goo.gl%2FAbC');
+    'https://x.github.io/Pictris/#album=https%3A%2F%2Fphotos.app.goo.gl%2FAbC');
+  const loc = (href) => new URL(href);
+  assert.equal(A.albumFromLocation(loc('https://x.github.io/Pictris/#album=https%3A%2F%2Fphotos.app.goo.gl%2FAbC')), 'https://photos.app.goo.gl/AbC');
+  assert.equal(A.albumFromLocation(loc('https://x.github.io/Pictris/?album=https%3A%2F%2Fphotos.app.goo.gl%2FAbC')), 'https://photos.app.goo.gl/AbC');
+  assert.equal(A.albumFromLocation(loc('https://x.github.io/Pictris/#album=https%3A%2F%2Fevil.example%2Fx')), null);
   assert.equal(A.parseAlbumHtml('<html>nothing</html>').items.length, 0);
 });
 
@@ -287,4 +291,13 @@ test('modern timing unchanged: 500 ms lock delay and immediate next piece', () =
   g.tick(20);
   assert.equal(g.stats.pieces, 1);
   assert.ok(g.active);
+});
+
+test('Google token only goes to googleusercontent.com over https', async () => {
+  const { isGoogleImageUrl } = await import('../src/gphotos.js');
+  assert.ok(isGoogleImageUrl('https://lh3.googleusercontent.com/pw/abc'));
+  assert.ok(isGoogleImageUrl('https://video-downloads.googleusercontent.com/x'));
+  for (const bad of ['http://lh3.googleusercontent.com/x', 'https://googleusercontent.com.evil.example/x',
+    'https://evilgoogleusercontent.com/x', 'https://example.com/?h=googleusercontent.com', 'javascript:alert(1)', undefined])
+    assert.equal(isGoogleImageUrl(bad), false, String(bad));
 });

@@ -50,6 +50,14 @@ export const createSession = (token) => api(token, '/sessions', { method: 'POST'
 
 const dur = (s, d) => (s ? parseFloat(s) * 1000 : d);
 
+/** The access token is only ever attached to Google's own image servers. */
+export function isGoogleImageUrl(u) {
+  try {
+    const x = new URL(u);
+    return x.protocol === 'https:' && (x.hostname === 'googleusercontent.com' || x.hostname.endsWith('.googleusercontent.com'));
+  } catch { return false; }
+}
+
 /** Polls until the user has finished picking. */
 export async function waitForSelection(token, session, { signal } = {}) {
   const interval = Math.max(1000, dur(session.pollingConfig?.pollInterval, 3000));
@@ -79,7 +87,9 @@ export async function importSelection(token, sessionId, onProgress = () => {}) {
   let done = 0;
   for (const item of photos) {
     try {
-      const r = await fetch(`${item.mediaFile.baseUrl}=w2048-h2048`, { headers: { Authorization: `Bearer ${token}` } });
+      const base = item.mediaFile?.baseUrl;
+      if (!isGoogleImageUrl(base)) throw new Error('unexpected download address; skipped');
+      const r = await fetch(`${base}=w2048-h2048`, { headers: { Authorization: `Bearer ${token}` }, referrerPolicy: 'no-referrer' });
       if (!r.ok) throw new Error(`download failed (${r.status})`);
       const blob = await r.blob();
       const created = item.createTime ? Date.parse(item.createTime) : null;
