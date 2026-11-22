@@ -327,9 +327,7 @@ export class Game {
     const a = this.active;
     const tspin = this.detectTSpin();
     let allHidden = true;
-    let sx = 0, sy = 0;
     for (const [cx, cy] of CELLS[a.type][a.rot]) {
-      sx += a.x + cx; sy += a.y + cy;
       const y = a.y + cy;
       this.board[y * COLS + a.x + cx] = TYPES.indexOf(a.type) + 1;
       if (y >= HIDDEN) allHidden = false;
@@ -337,7 +335,7 @@ export class Game {
     this.stats.pieces++;
     this.active = null;
     this.canHold = true;
-    this.emit('lock', { hard, type: a.type, cx: sx / 4, cy: sy / 4 }); // cx, cy: landing centre in board cells
+    this.emit('lock', { hard, type: a.type });
 
     const rows = [];
     for (let y = 0; y < ROWS; y++) {

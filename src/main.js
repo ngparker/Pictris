@@ -265,10 +265,7 @@ function endCelebration() {
 // ---------------- game flow ----------------
 function onEvent(type, d) {
   switch (type) {
-    case 'lock':
-      sound.lock(d.hard);
-      if (settings.experience === 'mosaic') renderer.splash(d.cx, d.cy, d.hard ? 1 : 0.6);
-      break;
+    case 'lock': sound.lock(d.hard); break;
     case 'move': if (settings.moveSounds) sound.move(); break;
     case 'rotate': if (settings.moveSounds) sound.rotate(); break;
     case 'hold': sound.hold(); break;
