@@ -10,10 +10,10 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 
 // ---------------- settings ----------------
 const DEFAULTS = {
-  blockStyle: 'color', order: 'chrono', span: 10, background: true, dim: 0.2, blur: 1, tint: 0.15, v: 2,
+  blockStyle: 'color', order: 'chrono', span: 10, background: true, dim: 0.2, blur: 1, tint: 0.15, v: 3,
   boardOpacity: 0.9, captions: true, ghost: false, previews: 1, das: 183, arr: 33,
   reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, volume: 0.5, moveSounds: false,
-  startLevel: 1, gClientId: '', celebrate: true, avoidRepeats: true, experience: 'focus', albumUrl: '', relay: '',
+  startLevel: 1, gClientId: '', celebrate: true, avoidRepeats: true, experience: 'mosaic', mode: 'marathon', albumUrl: '', relay: '',
 };
 const load = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return { ...d }; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
@@ -24,6 +24,8 @@ if (settings.blockStyle === 'photo') settings.blockStyle = 'reveal';
 if (settings.blockStyle === 'pieces') settings.blockStyle = 'color';
 // v2: solid blocks, photo comes into focus as the level progresses.
 if (!(load('pictris.settings', {}).v >= 2)) Object.assign(settings, { blockStyle: 'color', blur: DEFAULTS.blur, dim: DEFAULTS.dim, v: 2 });
+// v3: Blobs becomes the default photo style.
+if (!(load('pictris.settings', {}).v >= 3)) Object.assign(settings, { experience: 'mosaic', v: 3 });
 
 // ---------------- core objects ----------------
 const canvas = $('#gl');
@@ -397,7 +399,7 @@ addEventListener('keydown', (e) => {
   if (!act) return;
   e.preventDefault();
   if (act === 'mute') { sound.muted = !sound.muted; toast(sound.muted ? 'Sound off' : 'Sound on'); return; }
-  if (state === 'menu') { if (act === 'enter' || act === 'hard') startGame('marathon'); return; }
+  if (state === 'menu') { if (act === 'enter' || act === 'hard') startGame(settings.mode); return; }
   if (state === 'over') {
     if (act === 'restart' || act === 'enter') startGame();
     else if (act === 'pause') toMenu();
@@ -515,10 +517,14 @@ for (let i = 1; i <= 15; i++) sel.add(new Option(i, i));
 sel.value = settings.startLevel;
 sel.onchange = () => { settings.startLevel = +sel.value; save('pictris.settings', settings); };
 
-$$('[data-start]').forEach((b) => (b.onclick = () => startGame(b.dataset.start)));
+$('#playBtn').onclick = () => startGame(settings.mode);
 function renderExp() {
   $$('[data-exp]').forEach((b) => b.setAttribute('aria-checked', b.dataset.exp === settings.experience));
+  $$('[data-mode]').forEach((b) => b.setAttribute('aria-checked', b.dataset.mode === settings.mode));
 }
+$$('[data-mode]').forEach((b) => (b.onclick = () => {
+  settings.mode = b.dataset.mode; save('pictris.settings', settings); renderExp();
+}));
 $$('[data-exp]').forEach((b) => (b.onclick = () => {
   settings.experience = b.dataset.exp; save('pictris.settings', settings); renderExp();
 }));

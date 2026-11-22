@@ -31,18 +31,27 @@
     <div class="card">
       <h1>Pictris</h1>
       <p class="sub">Stack blocks. Watch your family grow up.</p>
-      <div class="modes">
-        <button class="primary" data-start="marathon">Marathon<small>Speeds up every 10 lines</small></button>
-        <button class="primary" data-start="zen">Zen<small>Steady pace, no game over</small></button>
+      <div class="pick">
+        <span class="pick-label">Game</span>
+        <div class="modes" role="radiogroup" aria-label="Game">
+          <button type="button" role="radio" data-mode="marathon">Marathon<small>Speeds up every 10 lines</small></button>
+          <button type="button" role="radio" data-mode="zen">Zen<small>Steady pace, no game over</small></button>
+        </div>
       </div>
-      <div class="exp" role="radiogroup" aria-label="Photo style">
-        <button type="button" role="radio" data-exp="focus">Focus<small>Blurred photo sharpens as you clear lines</small></button>
-        <button type="button" role="radio" data-exp="mosaic">Blobs<small>Photo blooms in as blobs that merge</small></button>
-        <button type="button" role="radio" data-exp="living">Living<small>Photo comes alive, dawn to daylight</small></button>
+      <div class="pick">
+        <span class="pick-label">Photo style</span>
+        <div class="exp" role="radiogroup" aria-label="Photo style">
+          <button type="button" role="radio" data-exp="mosaic">Blobs<small>Photo blooms in as blobs that merge</small></button>
+          <button type="button" role="radio" data-exp="focus">Focus<small>Blurred photo sharpens as you clear lines</small></button>
+          <button type="button" role="radio" data-exp="living">Living<small>Photo comes alive, dawn to daylight</small></button>
+        </div>
       </div>
-      <label class="inline">Start level
-        <select id="startLevel"></select>
-      </label>
+      <div class="play-row">
+        <label class="inline">Start level
+          <select id="startLevel"></select>
+        </label>
+        <button type="button" id="playBtn" class="primary play">Play <kbd>Enter</kbd></button>
+      </div>
       <div class="row">
         <button data-open="photosDlg">Photos <span id="photoCount" class="pill">0</span></button>
         <button data-open="settingsDlg">Settings</button>
@@ -139,7 +148,7 @@
     <div class="settings" id="settingsForm">
       <h3>Photos</h3>
       <label>Photo style
-        <select name="experience"><option value="focus">Focus</option><option value="mosaic">Blobs</option><option value="living">Living</option></select></label>
+        <select name="experience"><option value="mosaic">Blobs</option><option value="focus">Focus</option><option value="living">Living</option></select></label>
       <label>Blocks
         <select name="blockStyle"><option value="color">Solid colors (they hide the photo)</option><option value="reveal">Lenses: landed blocks show the photo sharp</option></select></label>
       <label>Photo order

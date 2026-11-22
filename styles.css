@@ -83,9 +83,19 @@ h1 { margin: 0; font-size: 44px; letter-spacing: .02em; font-weight: 700;
 h2 { margin: 0; font-size: 20px; }
 h3 { margin: 18px 0 6px; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
 .sub { margin: -6px 0 4px; color: var(--muted); }
-.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.modes button { display: flex; flex-direction: column; align-items: flex-start; padding: 14px; font-size: 17px; font-weight: 600; text-align: left; }
+.pick { display: flex; flex-direction: column; gap: 6px; }
+.pick-label { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.modes button { display: flex; flex-direction: column; align-items: flex-start; padding: 11px 13px; font-size: 16px; font-weight: 600; text-align: left; }
 .modes small { font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+.modes button[aria-checked=true] { border-color: rgba(143,184,255,.65); background: rgba(143,184,255,.16); }
+.play-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 2px; }
+button.play { flex: 0 0 auto; min-width: 46%; padding: 14px 22px; font-size: 19px; font-weight: 700; letter-spacing: .02em;
+  background: linear-gradient(135deg, rgba(143,184,255,.55), rgba(181,156,255,.5)); border-color: rgba(190,205,255,.7);
+  box-shadow: 0 6px 24px rgba(143,184,255,.22); }
+button.play:hover { background: linear-gradient(135deg, rgba(143,184,255,.7), rgba(181,156,255,.65)); }
+button.play kbd { margin-left: 6px; font-size: 11px; opacity: .75; vertical-align: 2px; }
+@media (hover: none) { button.play kbd { display: none; } }
 .exp { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .exp button { display: flex; flex-direction: column; align-items: flex-start; text-align: left; padding: 9px 11px; font-weight: 600; }
 .exp small { font-size: 11px; font-weight: 400; color: var(--muted); margin-top: 2px; line-height: 1.3; }
