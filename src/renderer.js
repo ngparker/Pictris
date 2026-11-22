@@ -4,7 +4,7 @@
 //   mosaic - "Blobs": the photo blooms in as soft blobs that merge, centre first, as you clear lines
 //   living - a sharp photo with gentle parallax, lit from dawn to golden hour to full light
 
-import { COLS, VISIBLE, HIDDEN, CELLS, TYPES, CLEAR_DELAY, LOCK_DELAY } from './game.js';
+import { COLS, ROWS, VISIBLE, HIDDEN, CELLS, TYPES, CLEAR_DELAY, LOCK_DELAY } from './game.js';
 
 export const COLORS = {
   I: [0.42, 0.80, 0.86], J: [0.40, 0.52, 0.86], L: [0.91, 0.62, 0.34], O: [0.92, 0.82, 0.40],
@@ -279,6 +279,52 @@ export class Renderer {
     this.sweep = -1;
   }
 
+  /**
+   * Game over: every block (and the piece that couldn't fit) bursts off the board, tumbling and
+   * falling away, so the photo is left in view. Particles are created on the first game-over frame.
+   */
+  drawFlyaway(game, now, reduceMotion) {
+    const L = this.layout, { cell, bx, by } = L;
+    if (!this.fly || this.fly.game !== game) {
+      const parts = [];
+      const add = (x, y, type) => {
+        if (y < HIDDEN - 2) return;
+        const r = Math.random;
+        parts.push({
+          x: bx + x * cell, y: by + (y - HIDDEN) * cell, type,
+          delay: Math.max(0, (y - HIDDEN)) * 22 + r() * 160,
+          vx: (((x + 0.5) / COLS) - 0.5) * cell * 16 + (r() - 0.5) * cell * 9,
+          vy: -cell * (8 + r() * 12),
+          spin: (r() - 0.5) * 14,
+        });
+      };
+      for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+        const c = game.board[y * COLS + x];
+        if (c) add(x, y, TYPES[c - 1]);
+      }
+      const a = game.active;
+      if (a) for (const [cx, cy] of CELLS[a.type][a.rot]) add(a.x + cx, a.y + cy, a.type);
+      this.fly = { game, t0: now, parts };
+    }
+    const G = cell * 48;
+    for (const p of this.fly.parts) {
+      const t = (now - this.fly.t0 - p.delay) / 1000;
+      if (reduceMotion) {
+        const a = 1 - Math.min(1, Math.max(0, (now - this.fly.t0) / 600));
+        if (a > 0) this.block(p.x, p.y, cell, p.type, { alpha: a });
+        continue;
+      }
+      if (t <= 0) { this.block(p.x, p.y, cell, p.type); continue; }
+      const alpha = 1 - Math.min(1, Math.max(0, (t - 0.7) / 0.7));
+      if (alpha <= 0) continue;
+      const x = p.x + p.vx * t, y = p.y + p.vy * t + 0.5 * G * t * t;
+      const sc = 1 - 0.3 * Math.min(1, t / 1.2);
+      const squash = 0.35 + 0.65 * Math.abs(Math.cos(t * p.spin)); // a cheap tumble
+      const w = cell * sc * squash, h = cell * sc;
+      this.block(x + (cell - w) / 2, y + (cell - h) / 2, 0, p.type, { alpha, w, h, flash: Math.max(0, 0.35 - t) });
+    }
+  }
+
   /** Living: a light sweep across the photo (called on line clears). */
   pulse() { this.sweep = 0; }
 
@@ -542,9 +588,10 @@ export class Renderer {
   }
 
   block(x, y, size, type, opts = {}) {
-    const g = Math.max(1, Math.round(size * 0.06));
-    const r = Math.max(1, size * 0.14);
-    this.quad(x + g / 2, y + g / 2, size - g, size - g, opts.color || COLORS[type], opts.alpha ?? 1,
+    const w = opts.w ?? size, h = opts.h ?? size;
+    const g = Math.max(1, Math.round(Math.max(w, h) * 0.06));
+    const r = Math.max(1, Math.min(w, h) * 0.14);
+    this.quad(x + g / 2, y + g / 2, w - g, h - g, opts.color || COLORS[type], opts.alpha ?? 1,
       opts.mode ?? 0, opts.flash || 0, opts.tint || 0, r);
   }
 
@@ -642,7 +689,9 @@ export class Renderer {
     for (let x = 1; x < COLS; x++) this.quad(bx + x * cell - 0.5, by, 1, bh, gc, 0.035, 3);
     for (let y = 1; y < VISIBLE; y++) this.quad(bx, by + y * cell - 0.5, bw, 1, gc, 0.035, 3);
 
-    if (game) {
+    if (game && game.over) this.drawFlyaway(game, v.time, s.reduceMotion);
+    else this.fly = null;
+    if (game && !game.over) {
       const photoBlocks = s.blockStyle === 'reveal' && (has0 || has1);
       const clearing = game.clearing;
       const clearT = clearing ? 1 - clearing.t / CLEAR_DELAY : 0;

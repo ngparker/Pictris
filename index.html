@@ -81,13 +81,18 @@
   </section>
 
   <section id="over" class="overlay" hidden>
-    <div class="card small">
+    <div class="card over-card">
       <h2>Game over</h2>
       <p class="big" id="overScore">0</p>
       <p id="overDetail" class="hint"></p>
-      <button class="primary" data-act="restart">Play again <kbd>Enter</kbd></button>
-      <button data-open="albumDlg">Photos this game <kbd>V</kbd></button>
-      <button data-act="menu">Menu</button>
+      <div id="overPhotos" class="over-photos" hidden>
+        <h3 class="pick-label">Photos this game <span class="hint">· tap to view</span></h3>
+        <div id="overGrid" class="over-grid"></div>
+      </div>
+      <div class="over-actions">
+        <button type="button" class="primary play" data-act="restart">Play again <kbd>Enter</kbd></button>
+        <button type="button" data-act="menu">Menu <kbd>Esc</kbd></button>
+      </div>
     </div>
   </section>
 

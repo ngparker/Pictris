@@ -422,7 +422,9 @@ function endGame() {
   if (isBest) { best[mode] = game.score; save('pictris.best', best); }
   $('#overScore').textContent = game.score.toLocaleString();
   $('#overDetail').textContent = `${game.lines} lines · level ${game.level}${isBest ? ' · new best!' : ''}`;
-  setTimeout(() => { if (state === 'over') $('#over').hidden = false; }, 700);
+  renderOverPhotos();
+  // Let the blocks fly off first, then show the score and the game's photos.
+  setTimeout(() => { if (state === 'over') { $('#over').hidden = false; $('#over [data-act=restart]').focus(); } }, 1500);
 }
 
 function setPause(on) {
@@ -736,18 +738,49 @@ function albumShow(i) {
 }
 // Full-page view: tap the photo; tap again, Esc or ✕ to return. Arrows / swipe step through.
 const viewer = $('#viewer');
+let viewerUrl = null;
 function viewerShow() {
   const g = gameShown[albumAt];
   if (!g) return;
   const img = $('#viewerImg');
   img.referrerPolicy = 'no-referrer';
-  img.src = $('#albumImg').src;
+  if (viewerUrl) URL.revokeObjectURL(viewerUrl);
+  viewerUrl = g.rec.remote ? null : URL.createObjectURL(g.rec.blob);
+  img.src = viewerUrl || A.sized(g.rec, 2048);
   $('#viewerCap').textContent = `${fmtDay(g.rec.date)} · level ${g.level}`;
   const many = gameShown.length > 1;
   $('#viewerPrev').hidden = $('#viewerNext').hidden = !many;
 }
-function viewerStep(d) { albumShow(albumAt + d); viewerShow(); }
-$('#albumImg').onclick = () => { viewerShow(); viewer.showModal(); };
+function viewerStep(d) {
+  albumAt = (albumAt + d + gameShown.length) % gameShown.length;
+  if ($('#albumDlg').open) albumShow(albumAt);
+  viewerShow();
+}
+function openViewer(i) { albumAt = i; viewerShow(); viewer.showModal(); }
+$('#albumImg').onclick = () => openViewer(albumAt);
+
+/** Game over: the photos this game showed, as a grid; tap one to view it full page. */
+const overThumbs = [];
+function renderOverPhotos() {
+  overThumbs.splice(0).forEach(URL.revokeObjectURL);
+  const grid = $('#overGrid');
+  grid.textContent = '';
+  $('#overPhotos').hidden = !gameShown.length;
+  gameShown.forEach((g, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    const img = new Image();
+    img.referrerPolicy = 'no-referrer';
+    img.alt = `Level ${g.level}, ${fmtDate(g.rec.date)}`;
+    if (g.rec.remote) img.src = A.sized(g.rec, 240, true);
+    else { const u = URL.createObjectURL(g.rec.thumb); overThumbs.push(u); img.src = u; }
+    const cap = document.createElement('span');
+    cap.textContent = `L${g.level} · ${fmtDate(g.rec.date)}`;
+    b.append(img, cap);
+    b.onclick = () => openViewer(i);
+    grid.append(b);
+  });
+}
 $('#viewerImg').onclick = () => viewer.close();
 $('#viewerClose').onclick = () => viewer.close();
 $('#viewerPrev').onclick = (e) => { e.stopPropagation(); viewerStep(-1); };

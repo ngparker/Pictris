@@ -53,6 +53,17 @@ body.celebrate #hud { opacity: .12; }
 .album figure img { width: 100%; height: min(62dvh, 640px); object-fit: contain; border-radius: 10px; background: rgba(0,0,0,.35); }
 .album figure button { font-size: 22px; padding: 10px 12px; }
 .album figure img { cursor: zoom-in; }
+.card.over-card { width: min(600px, 100%); text-align: center; max-height: calc(100dvh - 32px); overflow: auto; }
+.over-photos { display: flex; flex-direction: column; gap: 8px; text-align: left; border-top: 1px solid var(--line); padding-top: 12px; }
+.over-photos .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.over-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; max-height: 42dvh; overflow: auto; padding: 2px; }
+.over-grid button { padding: 0; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; background: rgba(255,255,255,.04); }
+.over-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.over-grid span { font-size: 11px; color: var(--muted); padding: 4px 6px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.over-actions { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; margin-top: 4px; }
+.over-actions button.play { min-width: 0; }
+.over-actions kbd { margin-left: 6px; font-size: 11px; opacity: .75; }
+@media (hover: none) { .over-actions kbd { display: none; } }
 dialog.viewer { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0;
   background: #000; color: var(--fg); overflow: hidden; }
 dialog.viewer::backdrop { background: #000; }
