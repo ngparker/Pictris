@@ -233,3 +233,22 @@ test('cheatLine counts a line, emits clear, and levels up every 10', () => {
   assert.equal(ev.filter(([t]) => t === 'clear').length, 10);
   assert.deepEqual(ev.filter(([t]) => t === 'levelup'), [['levelup', 4]]);
 });
+
+test('serialize / restore resumes the exact same game', () => {
+  const a = new Game({ seed: 99, mode: 'zen', startLevel: 3 });
+  for (let i = 0; i < 6; i++) { a.move(i % 2 ? 1 : -1); a.hardDrop(); a.tick(300); }
+  a.holdPiece();
+  const snap = a.serialize();
+  const b = Game.restore(JSON.parse(JSON.stringify(snap)));
+  assert.ok(b);
+  assert.deepEqual(Array.from(b.board), Array.from(a.board));
+  for (const k of ['mode', 'startLevel', 'score', 'lines', 'level', 'hold', 'canHold']) assert.deepEqual(b[k], a[k], k);
+  assert.deepEqual(b.active, a.active);
+  // Same future: identical piece sequence and results from identical inputs.
+  for (let i = 0; i < 20; i++) { a.hardDrop(); a.tick(300); b.hardDrop(); b.tick(300); }
+  assert.deepEqual(b.queue, a.queue);
+  assert.deepEqual(Array.from(b.board), Array.from(a.board));
+  assert.equal(b.score, a.score);
+  assert.equal(Game.restore({ v: 2 }), null);
+  assert.equal(Game.restore(null), null);
+});

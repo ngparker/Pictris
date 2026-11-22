@@ -1,5 +1,6 @@
-// Offline support: cache the app shell, serve stale-while-revalidate.
-const CACHE = 'pictris-v13';
+// Offline support: always try the network first so a new version is used as soon as it's deployed
+// (never a mix of old and new files), and fall back to the cache when offline.
+const CACHE = 'pictris-v14';
 const SHELL = ['./', 'index.html', 'styles.css', 'manifest.webmanifest', 'icons/icon.svg',
   'src/main.js', 'src/game.js', 'src/renderer.js', 'src/photos.js', 'src/gphotos.js', 'src/album.js', 'src/audio.js'];
 
@@ -16,8 +17,12 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(caches.open(CACHE).then(async (c) => {
     // Page loads may carry ?album=…; they are all the same shell.
     const key = e.request.mode === 'navigate' ? 'index.html' : e.request;
-    const hit = await c.match(key);
-    const net = fetch(e.request).then((r) => { if (r.ok) c.put(key, r.clone()); return r; }).catch(() => hit);
-    return hit || net;
+    try {
+      const r = await fetch(e.request, { cache: 'no-cache' });
+      if (r.ok) c.put(key, r.clone());
+      return r;
+    } catch {
+      return (await c.match(key)) || Response.error();
+    }
   }));
 });

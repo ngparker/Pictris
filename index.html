@@ -31,27 +31,31 @@
     <div class="card">
       <h1>Pictris</h1>
       <p class="sub">Stack blocks. Watch your family grow up.</p>
-      <div class="pick">
-        <span class="pick-label">Game</span>
-        <div class="modes" role="radiogroup" aria-label="Game">
-          <button type="button" role="radio" data-mode="marathon">Marathon<small>Speeds up every 10 lines</small></button>
-          <button type="button" role="radio" data-mode="zen">Zen<small>Steady pace, no game over</small></button>
+      <button type="button" id="continueBtn" class="resume" hidden>
+        <span class="resume-main">Continue <kbd>Enter</kbd></span>
+        <span class="resume-sub" id="continueInfo"></span>
+      </button>
+      <section class="block" aria-labelledby="newGameLabel">
+        <h2 class="pick-label" id="newGameLabel">New game</h2>
+        <div class="modes" role="radiogroup" aria-label="Game type">
+          <button type="button" role="radio" data-mode="marathon"><span class="opt-name">Marathon</span><small>Speeds up every 10 lines</small></button>
+          <button type="button" role="radio" data-mode="zen"><span class="opt-name">Zen</span><small>Steady pace, no game over</small></button>
         </div>
-      </div>
-      <div class="pick">
-        <span class="pick-label">Photo style</span>
+        <div class="play-row">
+          <label class="inline">Start level
+            <select id="startLevel"></select>
+          </label>
+          <button type="button" id="playBtn" class="primary play"><span id="playLabel">Play</span> <kbd id="playKbd">Enter</kbd></button>
+        </div>
+      </section>
+      <section class="block" aria-labelledby="styleLabel">
+        <h2 class="pick-label" id="styleLabel">Photo style</h2>
         <div class="exp" role="radiogroup" aria-label="Photo style">
-          <button type="button" role="radio" data-exp="mosaic">Blobs<small>Photo blooms in as blobs that merge</small></button>
-          <button type="button" role="radio" data-exp="focus">Focus<small>Blurred photo sharpens as you clear lines</small></button>
-          <button type="button" role="radio" data-exp="living">Living<small>Photo comes alive, dawn to daylight</small></button>
+          <button type="button" role="radio" data-exp="mosaic"><span class="opt-name">Blobs</span><small>Photo blooms in as blobs that merge</small></button>
+          <button type="button" role="radio" data-exp="focus"><span class="opt-name">Focus</span><small>Blurred photo sharpens as you clear lines</small></button>
+          <button type="button" role="radio" data-exp="living"><span class="opt-name">Living</span><small>Photo comes alive, dawn to daylight</small></button>
         </div>
-      </div>
-      <div class="play-row">
-        <label class="inline">Start level
-          <select id="startLevel"></select>
-        </label>
-        <button type="button" id="playBtn" class="primary play">Play <kbd>Enter</kbd></button>
-      </div>
+      </section>
       <div class="row">
         <button data-open="photosDlg">Photos <span id="photoCount" class="pill">0</span></button>
         <button data-open="settingsDlg">Settings</button>
@@ -68,11 +72,11 @@
   <section id="pause" class="overlay" hidden>
     <div class="card small">
       <h2>Paused</h2>
-      <button class="primary" data-act="resume">Resume</button>
+      <button class="primary" data-act="resume">Resume <kbd>Esc</kbd></button>
       <button data-open="albumDlg">Photos so far <kbd>V</kbd></button>
       <button data-act="restart">Restart <kbd>R</kbd></button>
       <button data-open="settingsDlg">Settings</button>
-      <button data-act="menu">Quit to menu</button>
+      <button data-act="menu">Save &amp; quit to menu</button>
     </div>
   </section>
 

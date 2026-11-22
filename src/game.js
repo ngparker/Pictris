@@ -62,16 +62,18 @@ export function msPerRow(level) {
   return Math.pow(0.8 - (L - 1) * 0.007, L - 1) * 1000;
 }
 
-export function mulberry32(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+/** mulberry32 step on an explicit state, so the generator can be saved and resumed. */
+function mulberry32Next(state) {
+  const a = (state + 0x6d2b79f5) >>> 0;
+  let t = a;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return [a, ((t ^ (t >>> 14)) >>> 0) / 4294967296];
 }
+
+// Fields that fully describe a game in progress (see Game.serialize / Game.restore).
+const SAVED = ['mode', 'startLevel', 'rng', 'queue', 'hold', 'canHold', 'active', 'score', 'lines', 'level', 'combo',
+  'b2b', 'over', 'clearing', 'gravityAcc', 'lockTimer', 'lockResets', 'lowestY', 'lastRotate', 'lastKick', 'stats'];
 
 export class Game {
   /**
@@ -84,7 +86,7 @@ export class Game {
   constructor({ mode = 'marathon', startLevel = 1, seed = Date.now(), onEvent = () => {} } = {}) {
     this.mode = mode;
     this.startLevel = startLevel;
-    this.rand = mulberry32(seed);
+    this.rng = seed >>> 0;
     this.emit = onEvent;
     this.board = new Uint8Array(ROWS * COLS); // 0 empty, else TYPES index + 1
     this.queue = [];
@@ -108,6 +110,30 @@ export class Game {
     this.stats = { pieces: 0, quads: 0, tspins: 0 };
     this.fillQueue();
     this.spawn();
+  }
+
+  rand() {
+    const [state, r] = mulberry32Next(this.rng);
+    this.rng = state;
+    return r;
+  }
+
+  /** Plain-JSON snapshot of the whole game, including the randomizer, for continuing later. */
+  serialize() {
+    const o = { v: 1, board: Array.from(this.board) };
+    for (const k of SAVED) o[k] = this[k];
+    return JSON.parse(JSON.stringify(o));
+  }
+
+  /** Rebuild a game from serialize() output. Returns null if the data doesn't look like a save. */
+  static restore(data, { onEvent = () => {} } = {}) {
+    if (!data || data.v !== 1 || !Array.isArray(data.board) || data.board.length !== ROWS * COLS) return null;
+    const g = new Game({ mode: data.mode, startLevel: data.startLevel, seed: 1, onEvent: () => {} });
+    g.board = Uint8Array.from(data.board);
+    for (const k of SAVED) if (k in data) g[k] = data[k];
+    if (g.active && !CELLS[g.active.type]) return null;
+    g.emit = onEvent;
+    return g;
   }
 
   fillQueue() {

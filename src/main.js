@@ -289,11 +289,77 @@ function onEvent(type, d) {
     }
     case 'zenReset': toast('Fresh board'); break;
     case 'gameover': endGame(); break;
+    case 'spawn': saveGame(); break;
   }
 }
 
 let starting = false;
 let focus = 0; // smoothed progress through the current level, 0..1
+
+// ---- continue a previous game: the game itself plus which photo each level showed ----
+const SAVE_KEY = 'pictris.save';
+function saveGame() {
+  if (!game || game.over || (state !== 'play' && state !== 'pause')) return;
+  const data = {
+    game: game.serialize(), seed, savedAt: Date.now(),
+    picks: [...picks].map(([level, rec]) => [level, rec.id]),
+    shown: gameShown.map((g) => [g.rec.id, g.level]),
+  };
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); } catch { /* quota / private mode */ }
+}
+function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } }
+function loadSave() {
+  try {
+    const d = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+    return d && d.game && d.game.v === 1 && !d.game.over ? d : null;
+  } catch { return null; }
+}
+
+function continueGame() {
+  const d = loadSave();
+  const g = d && Game.restore(d.game, { onEvent });
+  if (!g) { clearSave(); renderMenu(); return; }
+  endCelebration();
+  game = g;
+  seed = d.seed | 0;
+  const byId = new Map(photos.map((p) => [p.id, p]));
+  picks = new Map((d.picks || []).filter(([, id]) => byId.has(id)).map(([level, id]) => [level, byId.get(id)]));
+  gameShown = (d.shown || []).filter(([id]) => byId.has(id)).map(([id, level]) => ({ rec: byId.get(id), level }));
+  lastHud = '';
+  $('#menu').hidden = true; $('#over').hidden = true;
+  $('#hud').hidden = false;
+  placeHud();
+  updateHud();
+  showLevelPhoto(game.level); // the photo re-forms up to this level's progress
+  sound.ensure();
+  // Start paused so the player can get ready.
+  state = 'pause';
+  $('#pause').hidden = false;
+}
+
+const ago = (ms) => {
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h ago`;
+  return `${Math.round(h / 24)} d ago`;
+};
+
+/** Start screen: Continue is the main action when there's a saved game; otherwise Play starts a new one. */
+function renderMenu() {
+  const d = loadSave();
+  const has = !!d;
+  $('#continueBtn').hidden = !has;
+  if (has) {
+    const g = d.game;
+    $('#continueInfo').textContent = `${g.mode === 'zen' ? 'Zen' : 'Marathon'} · level ${g.level} · ${g.score.toLocaleString()} points · ${ago(d.savedAt)}`;
+  }
+  $('#playLabel').textContent = has ? 'New game' : 'Play';
+  $('#playKbd').hidden = has;
+  $('#playBtn').classList.toggle('secondary', has);
+  renderExp();
+}
 async function startGame(mode = game?.mode || 'marathon') {
   if (starting) return;
   starting = true;
@@ -304,6 +370,7 @@ async function startGame(mode = game?.mode || 'marathon') {
   endCelebration();
   starting = false;
   game = new Game({ mode, startLevel: settings.startLevel, seed, onEvent });
+  clearSave();
   lastHud = '';
   state = 'play';
   paused = false;
@@ -318,6 +385,7 @@ async function startGame(mode = game?.mode || 'marathon') {
 
 function endGame() {
   state = 'over';
+  clearSave();
   endCelebration();
   sound.gameOver();
   const mode = game.mode;
@@ -331,17 +399,20 @@ function endGame() {
 function setPause(on) {
   if (state !== 'play' && state !== 'pause') return;
   state = on ? 'pause' : 'play';
+  if (on) saveGame();
   $('#pause').hidden = !on;
   input.clear();
 }
 
 function toMenu() {
   if (game && game.score > (best[game.mode] || 0)) { best[game.mode] = game.score; save('pictris.best', best); }
+  saveGame();
   state = 'menu';
   endCelebration();
   game = null;
   $('#hud').hidden = true; $('#pause').hidden = true; $('#over').hidden = true; $('#menu').hidden = false;
   renderBests();
+  renderMenu();
   menuSlide();
 }
 
@@ -399,7 +470,10 @@ addEventListener('keydown', (e) => {
   if (!act) return;
   e.preventDefault();
   if (act === 'mute') { sound.muted = !sound.muted; toast(sound.muted ? 'Sound off' : 'Sound on'); return; }
-  if (state === 'menu') { if (act === 'enter' || act === 'hard') startGame(settings.mode); return; }
+  if (state === 'menu') {
+    if (act === 'enter' || act === 'hard') { if (loadSave()) continueGame(); else startGame(settings.mode); }
+    return;
+  }
   if (state === 'over') {
     if (act === 'restart' || act === 'enter') startGame();
     else if (act === 'pause') toMenu();
@@ -451,7 +525,8 @@ addEventListener('keyup', (e) => {
 });
 
 addEventListener('blur', () => { if (state === 'play') setPause(true); });
-document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') setPause(true); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') setPause(true); if (document.hidden) saveGame(); });
+addEventListener('pagehide', saveGame);
 
 // Touch: drag to move, tap to rotate, drag down to soft drop, flick down hard drop, flick up hold.
 const touch = { id: null };
@@ -518,6 +593,7 @@ sel.value = settings.startLevel;
 sel.onchange = () => { settings.startLevel = +sel.value; save('pictris.settings', settings); };
 
 $('#playBtn').onclick = () => startGame(settings.mode);
+$('#continueBtn').onclick = () => continueGame();
 function renderExp() {
   $$('[data-exp]').forEach((b) => b.setAttribute('aria-checked', b.dataset.exp === settings.experience));
   $$('[data-mode]').forEach((b) => b.setAttribute('aria-checked', b.dataset.mode === settings.mode));
@@ -820,6 +896,7 @@ $('#gPick').onclick = async () => {
 // ---------------- boot ----------------
 (async function boot() {
   renderBests();
+  renderMenu();
   placeHud();
   await refreshPhotos();
   menuSlide(true);
