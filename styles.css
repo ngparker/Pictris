@@ -60,7 +60,9 @@ body.celebrate #hud { opacity: .12; }
 .over-grid button { padding: 0; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; background: rgba(255,255,255,.04); }
 .over-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
 .over-grid span { font-size: 11px; color: var(--muted); padding: 4px 6px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.over-actions { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; margin-top: 4px; }
+.over-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.over-actions > button { flex: 1 1 auto; }
+.over-actions > button.play { flex: 2 1 auto; }
 .over-actions button.play { min-width: 0; }
 .over-actions kbd { margin-left: 6px; font-size: 11px; opacity: .75; }
 @media (hover: none) { .over-actions kbd { display: none; } }

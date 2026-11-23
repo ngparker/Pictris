@@ -140,8 +140,17 @@ test('marathon block-out ends game; zen resets board instead', () => {
   assert.equal(g.over, true);
   const z = new Game({ seed: 12, mode: 'zen' });
   for (let y = 0; y < ROWS; y++) fill(z, y, [0]);
+  let ev = null;
+  z.emit = (t) => { if (t === 'zenTopOut') ev = t; };
   z.spawn();
-  assert.equal(z.over, false);
+  assert.equal(z.over, false, 'zen never ends');
+  assert.equal(z.toppedOut, true, 'but stops for the board-full moment');
+  assert.equal(ev, 'zenTopOut');
+  z.tick(5000);
+  assert.ok(z.board.some((v) => v), 'board kept while topped out (for the fly-away)');
+  z.keepGoing();
+  assert.equal(z.toppedOut, false);
+  assert.ok(z.board.every((v) => v === 0) && z.active, 'fresh board and a new piece');
 });
 
 test('photo timeline: levels map oldest→newest and grid labels agree', async () => {

@@ -177,6 +177,17 @@ void main(){
   vec3 col = vColor.rgb;
   float alpha = vColor.a;
   if (mode == 3) { o = vec4(col*alpha*aa, alpha*aa); return; }
+  if (mode == 5) {
+    // Sparkle: a soft core with four thin rays; vParams.z twists it a little.
+    vec2 sp = (vLocal - 0.5) * 2.;
+    float an = vParams.z, cs = cos(an), sn = sin(an);
+    sp = vec2(cs*sp.x - sn*sp.y, sn*sp.x + cs*sp.y);
+    float dd = length(sp);
+    float core = exp(-dd*dd*28.);
+    float rays = (exp(-abs(sp.x)*26.) + exp(-abs(sp.y)*26.)) * max(0., 1. - dd);
+    float k = clamp(core + rays*0.75, 0., 1.) * alpha;
+    o = vec4(col*k, k*0.6); return;
+  }
   if (mode == 4) {
     float ring = aa - clamp(0.5-(d+vParams.z), 0., 1.);
     o = vec4(col*alpha*ring, alpha*ring); return;
@@ -292,7 +303,8 @@ export class Renderer {
    */
   drawFlyaway(game, now, reduceMotion) {
     const L = this.layout, { cell, bx, by } = L;
-    if (!this.fly || this.fly.game !== game) {
+    const key = `${game.topOuts}:${game.over}`;
+    if (!this.fly || this.fly.game !== game || this.fly.key !== key) {
       const parts = [];
       const add = (x, y, type) => {
         if (y < HIDDEN - 2) return;
@@ -311,7 +323,7 @@ export class Renderer {
       }
       const a = game.active;
       if (a) for (const [cx, cy] of CELLS[a.type][a.rot]) add(a.x + cx, a.y + cy, a.type);
-      this.fly = { game, t0: now, parts };
+      this.fly = { game, key, t0: now, parts };
     }
     const G = cell * 48;
     for (const p of this.fly.parts) {
@@ -329,6 +341,49 @@ export class Renderer {
       const squash = 0.35 + 0.65 * Math.abs(Math.cos(t * p.spin)); // a cheap tumble
       const w = cell * sc * squash, h = cell * sc;
       this.block(x + (cell - w) / 2, y + (cell - h) / 2, 0, p.type, { alpha, w, h, flash: Math.max(0, 0.35 - t) });
+    }
+  }
+
+  /**
+   * Gentle encouragement for multi-line clears: small twinkles along the cleared rows.
+   * 2 lines: a few cool twinkles; 3: more, drifting up; 4: warm gold, drifting up and out.
+   */
+  sparkle(rows, lines) {
+    const L = this.layout;
+    if (!L || lines < 2) return;
+    const now = performance.now();
+    const palette = { 2: [[0.80, 0.90, 1.0]], 3: [[0.75, 0.95, 1.0], [0.88, 0.80, 1.0]], 4: [[1.0, 0.86, 0.50], [1.0, 0.95, 0.75]] }[Math.min(4, lines)];
+    const perRow = { 2: 4, 3: 5, 4: 7 }[Math.min(4, lines)];
+    this.sparks = (this.sparks || []).filter((p) => now - p.t0 < p.life);
+    for (const row of rows) {
+      const y = L.by + (row - HIDDEN + 0.5) * L.cell;
+      for (let i = 0; i < perRow; i++) {
+        const r = Math.random;
+        this.sparks.push({
+          x: L.bx + (i + 0.2 + r() * 0.6) * (L.bw / perRow), y: y + (r() - 0.5) * L.cell * 0.6,
+          t0: now + r() * 260, life: 700 + r() * 500 + (lines >= 4 ? 300 : 0),
+          size: L.cell * (0.5 + r() * 0.5) * (lines >= 4 ? 1.25 : 1),
+          vx: lines >= 4 ? (r() - 0.5) * L.cell * 2.2 : (r() - 0.5) * L.cell * 0.4,
+          vy: lines >= 3 ? -L.cell * (0.8 + r() * 1.2) * (lines >= 4 ? 1.5 : 1) : -L.cell * 0.2,
+          rot: r() * 0.8, color: palette[Math.floor(r() * palette.length)],
+        });
+      }
+    }
+    if (this.sparks.length > 160) this.sparks.splice(0, this.sparks.length - 160);
+  }
+
+  drawSparkles(now, reduceMotion) {
+    if (!this.sparks || !this.sparks.length) return;
+    this.sparks = this.sparks.filter((p) => now - p.t0 < p.life);
+    for (const p of this.sparks) {
+      const t = (now - p.t0) / p.life;
+      if (t < 0) continue;
+      // Twinkle: quick rise, gentle fade, slight shimmer.
+      const a = Math.sin(Math.PI * Math.min(1, t)) * (0.75 + 0.25 * Math.sin(t * 30));
+      const sec = (now - p.t0) / 1000;
+      const x = p.x + (reduceMotion ? 0 : p.vx * sec), y = p.y + (reduceMotion ? 0 : p.vy * sec);
+      const sz = p.size * (0.6 + 0.6 * Math.sin(Math.PI * Math.min(1, t)));
+      this.quad(x - sz / 2, y - sz / 2, sz, sz, p.color, a * 0.9, 5, 0, p.rot + t * 0.6, 0);
     }
   }
 
@@ -696,9 +751,10 @@ export class Renderer {
     for (let x = 1; x < COLS; x++) this.quad(bx + x * cell - 0.5, by, 1, bh, gc, 0.035, 3);
     for (let y = 1; y < VISIBLE; y++) this.quad(bx, by + y * cell - 0.5, bw, 1, gc, 0.035, 3);
 
-    if (game && game.over) this.drawFlyaway(game, v.time, s.reduceMotion);
+    const ended = game && (game.over || game.toppedOut);
+    if (ended) this.drawFlyaway(game, v.time, s.reduceMotion);
     else this.fly = null;
-    if (game && !game.over) {
+    if (game && !ended) {
       const photoBlocks = s.blockStyle === 'reveal' && (has0 || has1);
       const clearing = game.clearing;
       const clearT = clearing ? 1 - clearing.t / CLEAR_DELAY : 0;
@@ -755,6 +811,7 @@ export class Renderer {
         }
       }
     }
+    this.drawSparkles(performance.now(), s.reduceMotion);
     this.flush(has0, has1, t0, t1);
   }
 

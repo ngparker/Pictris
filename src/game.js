@@ -80,7 +80,7 @@ function mulberry32Next(state) {
 }
 
 // Fields that fully describe a game in progress (see Game.serialize / Game.restore).
-const SAVED = ['mode', 'startLevel', 'timing', 'are', 'rng', 'queue', 'hold', 'canHold', 'active', 'score', 'lines', 'level', 'combo',
+const SAVED = ['mode', 'startLevel', 'timing', 'are', 'topOuts', 'rng', 'queue', 'hold', 'canHold', 'active', 'score', 'lines', 'level', 'combo',
   'b2b', 'over', 'clearing', 'gravityAcc', 'lockTimer', 'lockResets', 'lowestY', 'lastRotate', 'lastKick', 'stats'];
 
 export class Game {
@@ -97,6 +97,8 @@ export class Game {
     this.startLevel = startLevel;
     this.timing = timing;
     this.are = 0; // classic: time left before the next piece appears
+    this.toppedOut = false; // zen: the board filled up; waiting for keepGoing()
+    this.topOuts = 0;
     this.rng = seed >>> 0;
     this.emit = onEvent;
     this.board = new Uint8Array(ROWS * COLS); // 0 empty, else TYPES index + 1
@@ -182,13 +184,8 @@ export class Game {
     }
     const p = { type, rot: 0, x: type === 'O' ? 4 : 3, y: HIDDEN - 2 };
     if (!this.fits(p.type, p.rot, p.x, p.y)) {
-      if (this.mode === 'zen') {
-        this.clearBoard();
-        this.emit('zenReset');
-      } else {
-        this.active = p;
-        return this.gameOver('blockout');
-      }
+      this.active = p;
+      return this.mode === 'zen' ? this.topOut() : this.gameOver('blockout');
     }
     if (this.fits(p.type, p.rot, p.x, p.y + 1)) p.y++;
     this.active = p;
@@ -206,7 +203,23 @@ export class Game {
   }
 
   get playable() {
-    return !this.over && !this.clearing && !!this.active;
+    return !this.over && !this.toppedOut && !this.clearing && !!this.active;
+  }
+
+  /** Zen never ends: a full board stops play (for the board-full moment) until keepGoing(). */
+  topOut() {
+    this.toppedOut = true;
+    this.topOuts++;
+    this.emit('zenTopOut');
+  }
+
+  keepGoing() {
+    if (!this.toppedOut) return;
+    this.toppedOut = false;
+    this.clearBoard();
+    this.active = null;
+    this.are = 0;
+    this.spawn();
   }
 
   get classic() { return this.timing === 'classic'; }
@@ -298,7 +311,7 @@ export class Game {
   }
 
   tick(dt) {
-    if (this.over) return;
+    if (this.over || this.toppedOut) return;
     if (this.clearing) {
       this.clearing.t -= dt;
       if (this.clearing.t <= 0) this.finishClear();
@@ -377,24 +390,17 @@ export class Game {
       for (let x = 0; x < COLS; x++) if (!this.board[y * COLS + x]) { full = false; break; }
       if (full) rows.push(y);
     }
-    this.score_(rows.length, tspin);
+    this.score_(rows.length, tspin, rows);
 
     if (rows.length) {
       this.clearing = { rows, t: CLEAR_DELAY };
       return;
     }
-    if (allHidden) {
-      if (this.mode === 'zen') {
-        this.clearBoard();
-        this.emit('zenReset');
-      } else {
-        return this.gameOver('lockout');
-      }
-    }
+    if (allHidden) return this.mode === 'zen' ? this.topOut() : this.gameOver('lockout');
     this.next();
   }
 
-  score_(n, tspin) {
+  score_(n, tspin, rows = []) {
     const lv = this.level;
     let base;
     if (tspin === 'full') base = [400, 800, 1200, 1600][n];
@@ -416,7 +422,7 @@ export class Game {
     pts += 50 * this.combo * lv;
     this.score += pts;
     if (n === 4) this.stats.quads++;
-    this.emit('clear', { lines: n, tspin, b2b, combo: this.combo, points: pts });
+    this.emit('clear', { lines: n, tspin, b2b, combo: this.combo, points: pts, rows });
   }
 
   /**

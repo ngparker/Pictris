@@ -1,6 +1,6 @@
 // Offline support: always try the network first so a new version is used as soon as it's deployed
 // (never a mix of old and new files), and fall back to the cache when offline.
-const CACHE = 'pictris-v19';
+const CACHE = 'pictris-v20';
 const SHELL = ['./', 'index.html', 'styles.css', 'manifest.webmanifest', 'icons/icon.svg',
   'src/main.js', 'src/game.js', 'src/renderer.js', 'src/photos.js', 'src/gphotos.js', 'src/album.js', 'src/audio.js', 'src/faces.js'];
 

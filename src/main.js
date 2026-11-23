@@ -14,7 +14,7 @@ const DEFAULTS = {
   blockStyle: 'color', order: 'chrono', span: 10, background: true, dim: 0.2, blur: 1, tint: 0.15, v: 3,
   boardOpacity: 0.9, captions: true, ghost: false, previews: 1, das: 183, arr: 33,
   reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, volume: 0.5, moveSounds: false,
-  startLevel: 1, gClientId: '', celebrate: true, avoidRepeats: true, experience: 'mosaic', mode: 'marathon', timing: 'modern', albumUrl: '', relay: '',
+  startLevel: 1, gClientId: '', celebrate: true, clearSparkles: true, avoidRepeats: true, experience: 'mosaic', mode: 'marathon', timing: 'modern', albumUrl: '', relay: '',
 };
 const load = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return { ...d }; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
@@ -310,6 +310,7 @@ function onEvent(type, d) {
     case 'hold': sound.hold(); break;
     case 'clear': {
       if (d.lines) { sound.clear(d.lines, d.combo); renderer.pulse(); }
+      if (d.lines >= 2 && settings.clearSparkles !== false) renderer.sparkle(d.rows || [], d.lines);
       break;
     }
     case 'levelup': {
@@ -323,7 +324,7 @@ function onEvent(type, d) {
       }
       break;
     }
-    case 'zenReset': toast('Fresh board'); break;
+    case 'zenTopOut': endGame({ zen: true }); break;
     case 'gameover': endGame(); break;
     case 'spawn': saveGame(); break;
   }
@@ -401,6 +402,7 @@ async function startGame(mode = game?.mode || 'marathon') {
   starting = true;
   seed = (Math.random() * 2 ** 31) | 0;
   game = null;
+  zenTopped = false;
   picks = new Map();
   gameShown = [];
   endCelebration();
@@ -419,10 +421,12 @@ async function startGame(mode = game?.mode || 'marathon') {
   canvas.focus?.();
 }
 
-function endGame() {
+/** Marathon: game over. Zen: the board filled up — same moment, then keep going on a fresh board. */
+function endGame({ zen = false } = {}) {
   state = 'over';
   overAt = performance.now();
-  clearSave();
+  zenTopped = zen;
+  if (!zen) clearSave();
   endCelebration();
   sound.gameOver();
   const mode = game.mode;
@@ -430,9 +434,30 @@ function endGame() {
   if (isBest) { best[mode] = game.score; save('pictris.best', best); }
   $('#overScore').textContent = game.score.toLocaleString();
   $('#overDetail').textContent = `${game.lines} lines · level ${game.level}${isBest ? ' · new best!' : ''}`;
+  $('#overTitle').textContent = zen ? 'Board full' : 'Game over';
+  $('#keepBtn').hidden = !zen;
+  const restart = $('#over [data-act=restart]');
+  restart.classList.toggle('primary', !zen);
+  restart.classList.toggle('play', !zen);
+  restart.firstChild.textContent = zen ? 'New game ' : 'Play again ';
+  restart.querySelector('kbd').hidden = zen;
   renderOverPhotos();
   // Let the blocks fly off first, then show the score and the game's photos.
-  setTimeout(() => { if (state === 'over') { $('#over').hidden = false; $('#over [data-act=restart]').focus(); } }, 1500);
+  setTimeout(() => {
+    if (state !== 'over') return;
+    $('#over').hidden = false;
+    (zen ? $('#keepBtn') : restart).focus();
+  }, 1500);
+}
+
+let zenTopped = false;
+function keepGoing() {
+  if (!game || !zenTopped) return;
+  zenTopped = false;
+  $('#over').hidden = true;
+  state = 'play';
+  game.keepGoing();
+  saveGame();
 }
 
 function setPause(on) {
@@ -445,6 +470,8 @@ function setPause(on) {
 
 function toMenu() {
   if (game && game.score > (best[game.mode] || 0)) { best[game.mode] = game.score; save('pictris.best', best); }
+  // Zen board-full: Continue later starts on a fresh board.
+  if (zenTopped && game) { zenTopped = false; game.keepGoing(); state = 'pause'; }
   saveGame();
   state = 'menu';
   endCelebration();
@@ -516,7 +543,8 @@ addEventListener('keydown', (e) => {
     return;
   }
   if (state === 'over') {
-    if (act === 'restart' || act === 'enter') startGame();
+    if (act === 'enter' && zenTopped) keepGoing();
+    else if (act === 'restart' || act === 'enter') startGame();
     else if (act === 'pause') toMenu();
     else if (act === 'album') openDialog('albumDlg');
     return;
@@ -528,6 +556,7 @@ addEventListener('keydown', (e) => {
     return;
   }
   if (act === 'pause') return setPause(true);
+  if (act === 'album') { setPause(true); openDialog('albumDlg'); return; } // V: pause and look at this game's photos
   if (!game || e.repeat) return;
   if (celebrate) {
     // A key press cuts the photo moment short; it isn't passed on to the piece.
@@ -624,7 +653,8 @@ function frame(now) {
   }
   // Nothing moves quickly on the menu, while paused or after game over: redraw ~10 times a second
   // instead of every frame (the photo drift is very slow), except during cross-fades and animations.
-  const idle = (state === 'menu' || state === 'pause' || (state === 'over' && now - overAt > 2200)) && !renderer.fading && !celebrate;
+  const sparkling = renderer.sparks && renderer.sparks.length;
+  const idle = (state === 'menu' || state === 'pause' || (state === 'over' && now - overAt > 2200)) && !renderer.fading && !celebrate && !sparkling;
   if (idle && now - lastRender < 100) { requestAnimationFrame(frame); return; }
   const rdt = Math.min(200, now - (lastRender || now - dt));
   lastRender = now;
@@ -660,6 +690,7 @@ $$('[data-act]').forEach((b) => (b.onclick = () => {
   if (a === 'resume') setPause(false);
   else if (a === 'restart') startGame();
   else if (a === 'menu') toMenu();
+  else if (a === 'keep') keepGoing();
 }));
 $('#pauseBtn').onclick = () => setPause(true);
 
